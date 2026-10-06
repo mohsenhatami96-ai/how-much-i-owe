@@ -15,8 +15,16 @@ like https://user.github.io/owe-app/ works.
 Open the URL in Safari → Share → **Add to Home Screen**. It then runs full-screen and offline.
 
 ## Attachments
-Each transaction has an **Attach documents** area (Camera · Photos & docs · Other file). Photos are
-downscaled to max 1600px JPEG; PDFs and other documents are stored unchanged. Tap a transaction to
+Each transaction has an **Attach documents** area (Camera · Photos & docs · Other file). PDFs and other
+documents are stored unchanged. Photos are compressed per ⚙︎ → **Photo quality**:
+
+| Mode | Long side | Format |
+|---|---|---|
+| High detail (default) | ≤ 2560 px (never upscaled) | WebP q0.82 if the browser can encode WebP, else JPEG; PNG screenshots q0.9 vs PNG, smallest wins |
+| Balanced | ≤ 2048 px | WebP/JPEG q0.78 |
+| Original | unchanged | original file |
+
+The original is kept whenever compression would not make it smaller. Tap a photo in the viewer to zoom to detail. Tap a transaction to
 see its attachments, preview them, Share/Save them, or delete them. Per-person "Other documents"
 are still available for things not tied to one transaction.
 

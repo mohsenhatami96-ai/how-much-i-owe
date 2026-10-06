@@ -302,3 +302,8 @@ main { padding: 8px 16px calc(var(--safe-bottom) + 110px); max-width: 720px; mar
   display: inline-flex; align-items: center; justify-content: center; gap: 8px; font-size: 16px; font-weight: 600; text-decoration: none;
 }
 .viewer-btn svg { width: 20px; height: 20px; }
+
+/* ---------- Viewer zoom (v1.2) ---------- */
+.viewer-stage img { cursor: zoom-in; }
+.viewer-stage.zoom { display: block; overflow: auto; -webkit-overflow-scrolling: touch; touch-action: pan-x pan-y pinch-zoom; }
+.viewer-stage.zoom img { max-width: none; max-height: none; height: auto; cursor: zoom-out; }

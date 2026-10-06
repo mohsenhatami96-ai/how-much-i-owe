@@ -3,11 +3,9 @@
 (() => {
 'use strict';
 
-const APP_VERSION = '1.1.0';
+const APP_VERSION = '1.2.0';
 const CURRENCIES = ['SEK', 'EUR', 'USD', 'GBP', 'NOK', 'DKK', 'IRR', 'TRY', 'CHF', 'AED', 'CAD', 'AUD', 'JPY', 'CNY', 'INR', 'PLN'];
-const MAX_IMG = 1600;   // longest side for stored photos
-const THUMB = 360;      // longest side for thumbnails
-const JPEG_Q = 0.82;
+const THUMB = 360;      // longest side for thumbnails (kept separately from the stored photo)
 
 /* =========================== IndexedDB =========================== */
 const DB_NAME = 'how-much-i-owe';
@@ -208,37 +206,100 @@ function loadImage(file) {
     img.src = url;
   });
 }
-function canvasToBlob(canvas, q) {
-  return new Promise((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Image encoding failed'))), 'image/jpeg', q));
+/* ---------- Photo compression ----------
+ * Goal: keep small receipt / screenshot text crisp while saving space.
+ * - never upscale; long side capped per quality mode
+ * - high-quality step-down (halving) resampling
+ * - WebP when the browser can encode it (checked via toBlob result type), else JPEG
+ * - PNG screenshots: lossy (q≈0.9) vs. PNG, smallest wins
+ * - never store something bigger than the original (original kept instead)
+ * - EXIF orientation is applied by the browser when decoding (<img>, image-orientation: from-image) */
+const PHOTO_MODES = {
+  high: { label: 'High detail', max: 2560, q: 0.82, pngQ: 0.9, hint: 'Up to 2560 px. Keeps small receipt text sharp and usually saves 90%+ of the space.' },
+  balanced: { label: 'Balanced', max: 2048, q: 0.78, pngQ: 0.85, hint: 'Up to 2048 px. Smaller files, text still readable.' },
+  original: { label: 'Original', max: Infinity, hint: 'No compression. Uses the most storage and makes backups big.' }
+};
+const DISPLAYABLE = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+let webpProbe = null;
+function canEncodeWebP() {
+  if (!webpProbe) webpProbe = new Promise((resolve) => {
+    try {
+      const c = document.createElement('canvas'); c.width = c.height = 4;
+      c.getContext('2d').fillRect(0, 0, 4, 4);
+      c.toBlob((b) => resolve(!!b && b.type === 'image/webp'), 'image/webp', 0.8);
+    } catch { resolve(false); }
+  });
+  return webpProbe;
 }
-async function scaleTo(img, max) {
-  const w0 = img.naturalWidth, h0 = img.naturalHeight;
-  if (!w0 || !h0) throw new Error('Image has no size');
-  const scale = Math.min(1, max / Math.max(w0, h0));
-  const w = Math.max(1, Math.round(w0 * scale)), h = Math.max(1, Math.round(h0 * scale));
-  const c = document.createElement('canvas');
-  c.width = w; c.height = h;
+function encodeCanvas(canvas, type, q) {
+  return new Promise((resolve) => {
+    try { canvas.toBlob((b) => resolve(b && b.type === type ? b : null), type, q); } catch { resolve(null); }
+  });
+}
+const fitSize = (w, h, max) => { const s = Math.min(1, max / Math.max(w, h)); return [Math.max(1, Math.round(w * s)), Math.max(1, Math.round(h * s))]; };
+/** High-quality resample: halve repeatedly while >= 2× the target, then one final smooth draw. */
+function drawScaled(src, sw, sh, w, h, background = '#fff') {
+  let cur = src, cw = sw, ch = sh;
+  const temps = [];
+  while (cw >= w * 2 && ch >= h * 2) {
+    const nw = Math.round(cw / 2), nh = Math.round(ch / 2);
+    const t = document.createElement('canvas'); t.width = nw; t.height = nh;
+    const tc = t.getContext('2d'); tc.imageSmoothingEnabled = true; tc.imageSmoothingQuality = 'high';
+    tc.drawImage(cur, 0, 0, cw, ch, 0, 0, nw, nh);
+    temps.push(t); cur = t; cw = nw; ch = nh;
+  }
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
   const ctx = c.getContext('2d');
-  ctx.fillStyle = '#fff'; // flatten transparent PNGs onto white for JPEG
-  ctx.fillRect(0, 0, w, h);
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(img, 0, 0, w, h);
-  const blob = await canvasToBlob(c, JPEG_Q);
-  c.width = c.height = 0; // free memory early on iOS
-  return { blob, w, h };
+  if (background) { ctx.fillStyle = background; ctx.fillRect(0, 0, w, h); }
+  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(cur, 0, 0, cw, ch, 0, 0, w, h);
+  temps.forEach((t) => { t.width = t.height = 0; }); // free memory early on iOS
+  return c;
 }
-/** Downscale an image File to max 1600px JPEG + a thumbnail. Images are kept as ArrayBuffers (most robust in Safari IDB). */
-async function processImage(file) {
+const freeCanvas = (c) => { c.width = c.height = 0; };
+const EXT_BY_TYPE = { 'image/webp': 'webp', 'image/jpeg': 'jpg', 'image/png': 'png', 'image/gif': 'gif' };
+
+/** Compress a photo/screenshot. opts.format forces the lossy output type (used by tests). */
+async function processImage(file, mode = state.photoQuality, opts = {}) {
+  const cfg = PHOTO_MODES[mode] || PHOTO_MODES.high;
   const { img, url } = await loadImage(file);
   try {
-    const full = await scaleTo(img, MAX_IMG);
-    const thumb = await scaleTo(img, THUMB);
-    const data = await full.blob.arrayBuffer();
+    const w0 = img.naturalWidth, h0 = img.naturalHeight; // already EXIF-oriented
+    if (!w0 || !h0) throw new Error('Image has no size');
+    const origType = mimeOf(file);
+    const origBuf = await file.arrayBuffer();
+    const keepable = DISPLAYABLE.includes(origType);
+
+    const [tw, th] = fitSize(w0, h0, THUMB);
+    const tc = drawScaled(img, w0, h0, tw, th);
+    const thumbBlob = await encodeCanvas(tc, 'image/jpeg', 0.8);
+    freeCanvas(tc);
+
+    let best = null; // { blob, w, h }
+    if (mode !== 'original' || !keepable) {
+      const [w, h] = mode === 'original' ? [w0, h0] : fitSize(w0, h0, cfg.max);
+      const c = drawScaled(img, w0, h0, w, h);
+      const lossy = opts.format || ((await canEncodeWebP()) ? 'image/webp' : 'image/jpeg');
+      const isPng = origType === 'image/png';
+      const q = mode === 'original' ? 0.92 : isPng ? cfg.pngQ : cfg.q;
+      const cands = [await encodeCanvas(c, lossy, q)];
+      if (lossy !== 'image/jpeg' && !cands[0]) cands.push(await encodeCanvas(c, 'image/jpeg', q));
+      if (isPng && (w !== w0 || h !== h0)) cands.push(await encodeCanvas(c, 'image/png'));
+      freeCanvas(c);
+      for (const b of cands) if (b && (!best || b.size < best.blob.size)) best = { blob: b, w, h };
+      if (!best) throw new Error('Image encoding failed');
+    }
+    let data, type, width, height, keptOriginal = false;
+    if (keepable && (!best || origBuf.byteLength <= best.blob.size)) {
+      data = origBuf; type = origType; width = w0; height = h0; keptOriginal = true;
+    } else {
+      data = await best.blob.arrayBuffer(); type = best.blob.type; width = best.w; height = best.h;
+    }
     const base = (file.name || 'photo').replace(/\.[^.]+$/, '');
     return {
-      kind: 'image', data, thumb: await thumb.blob.arrayBuffer(), type: 'image/jpeg',
-      width: full.w, height: full.h, name: base + '.jpg', size: data.byteLength
+      kind: 'image', data, thumb: thumbBlob ? await thumbBlob.arrayBuffer() : null, type, width, height,
+      name: `${base}.${EXT_BY_TYPE[type] || extOf(file.name) || 'img'}`, size: data.byteLength,
+      origSize: origBuf.byteLength, origType, origWidth: w0, origHeight: h0, photoMode: mode, keptOriginal
     };
   } finally { URL.revokeObjectURL(url); }
 }
@@ -265,7 +326,12 @@ async function processAttachments(files) {
       out.push(await processDocument(f));
     } catch (err) { console.error(err); toast(err.message || 'Could not read file', 3000); }
   }
-  if (out.length) toast(out.length === 1 ? '1 attachment added' : `${out.length} attachments added`);
+  if (out.length) {
+    const imgs = out.filter((a) => a.kind === 'image' && a.origSize);
+    const before = imgs.reduce((n, a) => n + a.origSize, 0), after = imgs.reduce((n, a) => n + a.size, 0);
+    const what = out.length === 1 ? (imgs.length ? 'Photo saved' : 'File attached') : `${out.length} attachments saved`;
+    toast(imgs.length ? `${what} · ${fmtBytes(before)} → ${fmtBytes(after)}` : what, 3200);
+  }
   return out;
 }
 /** Opens the native picker. mode: 'camera' | 'docs' (photos + documents) | 'any' (iOS Files, any type). */
@@ -333,11 +399,11 @@ function blobUrl(data, type = 'image/jpeg', bucket = viewUrls) {
   return u;
 }
 function revokeAll(bucket) { bucket.forEach((u) => URL.revokeObjectURL(u)); bucket.length = 0; }
-const thumbFor = (a, bucket) => (isImageAtt(a) ? blobUrl(a.thumb || a.data, 'image/jpeg', bucket) : null);
+const thumbFor = (a, bucket) => (isImageAtt(a) ? (a.thumb ? blobUrl(a.thumb, 'image/jpeg', bucket) : blobUrl(a.data, a.type, bucket)) : null);
 
 /* =========================== Rendering =========================== */
 const app = $('#app');
-let state = { defaultCurrency: 'SEK' };
+let state = { defaultCurrency: 'SEK', photoQuality: 'high' };
 
 function route() {
   const h = location.hash || '#/';
@@ -840,8 +906,22 @@ function openViewer(items, index, entryById) {
     revokeAll(urls);
     const url = blobUrl(a.data, a.type, urls);
     const t = a.type || '';
+    stage.classList.remove('zoom');
     if (isImageAtt(a)) {
-      stage.innerHTML = `<img alt="${esc(attName(a))}" src="${url}">`;
+      stage.innerHTML = `<img alt="${esc(attName(a))}" src="${url}" title="Tap to zoom">`;
+      const im = $('img', stage);
+      // Tap toggles between fit-to-screen and ~100% detail (1 image px = 1 device px on 2× screens).
+      im.onclick = (ev) => {
+        const r = im.getBoundingClientRect(); // measure the fitted size before switching modes
+        const zoomed = stage.classList.toggle('zoom');
+        if (!zoomed) { im.style.width = ''; return; }
+        const fx = (ev.clientX - r.left) / r.width, fy = (ev.clientY - r.top) / r.height;
+        im.style.width = Math.max(r.width, im.naturalWidth / 2) + 'px';
+        requestAnimationFrame(() => {
+          stage.scrollLeft = fx * im.offsetWidth - stage.clientWidth / 2;
+          stage.scrollTop = fy * im.offsetHeight - stage.clientHeight / 2;
+        });
+      };
     } else if (t === 'application/pdf' || t === 'text/plain') {
       stage.innerHTML = `<iframe class="doc-frame" title="${esc(attName(a))}" src="${url}"></iframe>`;
     } else if (t.startsWith('image/')) {
@@ -879,7 +959,7 @@ function openViewer(items, index, entryById) {
   let sx = 0, sy = 0, multi = false;
   v.addEventListener('touchstart', (e) => { multi = e.touches.length > 1; sx = e.touches[0].clientX; sy = e.touches[0].clientY; }, { passive: true });
   v.addEventListener('touchend', (e) => {
-    if (multi) return;
+    if (multi || stage.classList.contains('zoom')) return;
     const t = e.changedTouches[0], dx = t.clientX - sx, dy = t.clientY - sy;
     if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy)) step(dx < 0 ? 1 : -1);
     else if (dy > 110 && Math.abs(dy) > Math.abs(dx)) close();
@@ -965,22 +1045,43 @@ async function importData(text) {
   ms.put({ key: 'lastBackup', value: Date.now() }); // the imported file *is* a backup
   await txDone(t);
   if (data.settings && data.settings.defaultCurrency) state.defaultCurrency = data.settings.defaultCurrency;
+  if (data.settings && PHOTO_MODES[data.settings.photoQuality]) state.photoQuality = data.settings.photoQuality;
   return { people: people.length, entries: entries.length, images: images.length };
 }
 
+async function attachmentStats() {
+  const all = await getAll('images');
+  let bytes = 0, photos = 0, files = 0, origBytes = 0, photoBytes = 0;
+  for (const a of all) {
+    const size = a.data instanceof Blob ? a.data.size : (a.data ? a.data.byteLength : 0);
+    const thumb = a.thumb ? a.thumb.byteLength : 0;
+    bytes += size + thumb;
+    if (isImageAtt(a)) { photos++; photoBytes += size; origBytes += a.origSize || size; } else files++;
+  }
+  return { count: all.length, bytes, photos, files, saved: Math.max(0, origBytes - photoBytes) };
+}
+
 async function settingsSheet() {
-  const [lastBackup, persisted, est] = await Promise.all([
+  const [lastBackup, persisted, est, st] = await Promise.all([
     getMeta('lastBackup', null),
     navigator.storage && navigator.storage.persisted ? navigator.storage.persisted().catch(() => false) : false,
-    navigator.storage && navigator.storage.estimate ? navigator.storage.estimate().catch(() => null) : null
+    navigator.storage && navigator.storage.estimate ? navigator.storage.estimate().catch(() => null) : null,
+    attachmentStats()
   ]);
   let prepared = null;
+  const modeOptions = Object.entries(PHOTO_MODES).map(([k, m]) => `<option value="${k}" ${k === state.photoQuality ? 'selected' : ''}>${esc(m.label)}${k === 'high' ? ' (default)' : ''}</option>`).join('');
   openSheet({
     title: 'Settings & backup',
     left: 'Done',
     body: `
       <div class="field-group">
         <div class="field"><label for="s-cur" class="wide">Default currency</label><select id="s-cur">${currencyOptions(state.defaultCurrency)}</select></div>
+        <div class="field"><label for="s-photo" class="wide">Photo quality</label><select id="s-photo">${modeOptions}</select></div>
+      </div>
+      <p class="hint" id="s-photo-hint">${esc(PHOTO_MODES[state.photoQuality].hint)} Applies to new photos.</p>
+      <div class="field-group">
+        <div class="field settings-row"><span>Attachments</span><span class="val" id="s-att-usage">${st.count ? `${st.count} · ${esc(fmtBytes(st.bytes))}` : 'none'}</span></div>
+        ${st.photos ? `<div class="field settings-row"><span>Saved by compression</span><span class="val" id="s-att-saved">${esc(fmtBytes(st.saved))}</span></div>` : ''}
       </div>
       <div class="form-label">Backup</div>
       <div class="stack">
@@ -995,7 +1096,7 @@ async function settingsSheet() {
         Importing <b>replaces</b> all current data.
       </p>
       <div class="field-group">
-        <div class="field settings-row"><span>Storage used</span><span class="val">${est ? esc(fmtBytes(est.usage)) : 'unknown'}</span></div>
+        <div class="field settings-row"><span>Total storage used</span><span class="val">${est ? esc(fmtBytes(est.usage)) : 'unknown'}</span></div>
         <div class="field settings-row"><span>Persistent storage</span><span class="val">${persisted ? 'Granted' : 'Not granted'}</span></div>
         <div class="field settings-row"><span>Version</span><span class="val">${APP_VERSION}</span></div>
       </div>
@@ -1007,6 +1108,12 @@ async function settingsSheet() {
         await setMeta('defaultCurrency', state.defaultCurrency);
         toast(`Default currency: ${state.defaultCurrency}`);
         render();
+      };
+      $('#s-photo', ov).onchange = async (e) => {
+        state.photoQuality = e.target.value;
+        await setMeta('photoQuality', state.photoQuality);
+        $('#s-photo-hint', ov).textContent = PHOTO_MODES[state.photoQuality].hint + ' Applies to new photos.';
+        toast(`Photo quality: ${PHOTO_MODES[state.photoQuality].label}`);
       };
       const saveBtn = $('#s-save', ov);
       const deliver = async () => {
@@ -1072,13 +1179,15 @@ async function settingsSheet() {
 
 /* =========================== Boot =========================== */
 // Expose a tiny API for tests / debugging.
-window.oweApp = { parseAmount, balanceOf, buildExport, importData, version: APP_VERSION };
+window.oweApp = { parseAmount, balanceOf, buildExport, importData, processImage, canEncodeWebP, PHOTO_MODES, version: APP_VERSION };
 
 window.addEventListener('hashchange', () => { onHashNav(); closeSheet(); render(); window.scrollTo(0, 0); });
 
 async function boot() {
   try {
     state.defaultCurrency = await getMeta('defaultCurrency', 'SEK');
+    state.photoQuality = await getMeta('photoQuality', 'high');
+    if (!PHOTO_MODES[state.photoQuality]) state.photoQuality = 'high';
   } catch (err) {
     console.error(err);
     app.innerHTML = `<main><div class="empty"><div class="big">⚠️</div><h2>Storage unavailable</h2><p>This browser blocked IndexedDB (private mode?). ${esc(err.message || '')}</p></div></main>`;

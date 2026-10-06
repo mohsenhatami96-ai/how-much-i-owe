@@ -1,5 +1,5 @@
 /* How Much I Owe – service worker: caches the app shell for offline use. */
-const VERSION = 'v1.1.0';
+const VERSION = 'v1.2.0';
 const CACHE = `owe-shell-${VERSION}`;
 const SHELL = [
   './',
