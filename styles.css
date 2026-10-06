@@ -264,3 +264,41 @@ main { padding: 8px 16px calc(var(--safe-bottom) + 110px); max-width: 720px; mar
 @media (prefers-color-scheme: dark) {
   .segmented button.on { background: var(--card-2); }
 }
+
+/* ---------- Attachments (v1.1) ---------- */
+.attach-box { background: var(--card); border-radius: var(--radius); padding: 12px; box-shadow: var(--shadow); }
+.attach-box .gallery { margin-bottom: 12px; }
+.attach-buttons { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.attach-btn {
+  min-height: 66px; border: 0; border-radius: 12px; padding: 8px 4px;
+  background: rgba(10, 132, 255, .1); background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; font-size: 13px; font-weight: 600;
+}
+.attach-btn:active { opacity: .6; }
+.attach-btn svg { width: 24px; height: 24px; }
+.thumb.doc { background: var(--card-2); }
+.file-tile { display: flex; flex-direction: column; align-items: flex-start; justify-content: space-between; width: 100%; height: 100%; padding: 9px; text-align: left; color: var(--text); }
+.file-tile .fname { font-size: 12px; line-height: 1.25; font-weight: 500; word-break: break-word; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.file-tile .fsize { font-size: 11px; color: var(--text-2); }
+.ext { display: inline-block; font-size: 11px; font-weight: 800; letter-spacing: .03em; color: #fff; border-radius: 5px; padding: 3px 6px; background: #8e8e93; }
+.ext.pdf { background: #e5484d; } .ext.doc { background: #2563eb; } .ext.xls { background: #16a34a; } .ext.img { background: #a855f7; }
+.ext.big { font-size: 22px; padding: 10px 14px; border-radius: 12px; }
+.clip-badge { display: inline-flex; align-items: center; gap: 2px; color: var(--accent); font-weight: 600; margin-left: 4px; }
+.clip-badge svg { width: 13px; height: 13px; }
+.row .chev { margin-left: -4px; }
+.list.entries .row { padding-right: 10px; }
+.entry-icon.lg { width: 60px; height: 60px; border-radius: 18px; font-size: 30px; margin: 0 auto 10px; }
+.entry-desc { font-size: 19px; font-weight: 600; margin: 4px 0 4px; word-break: break-word; }
+.nav-back-label { max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.viewer-stage .doc-frame { width: 100%; height: 100%; border: 0; background: #fff; }
+.viewer-file { text-align: center; padding: 24px; max-width: 340px; }
+.viewer-file .vf-name { font-size: 18px; font-weight: 600; margin-top: 16px; word-break: break-word; }
+.viewer-file .vf-meta { font-size: 14px; opacity: .7; margin-top: 4px; }
+.viewer-file p { font-size: 15px; opacity: .85; }
+.viewer-caption { padding-bottom: 6px; min-height: 0; }
+.viewer-actions { display: flex; gap: 10px; justify-content: center; padding: 4px 16px calc(var(--safe-bottom) + 12px); }
+.viewer-btn {
+  flex: 1; max-width: 200px; min-height: 48px; border: 0; border-radius: 12px; background: rgba(255,255,255,.14); color: #fff;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px; font-size: 16px; font-weight: 600; text-decoration: none;
+}
+.viewer-btn svg { width: 20px; height: 20px; }

@@ -3,7 +3,7 @@
 (() => {
 'use strict';
 
-const APP_VERSION = '1.0.0';
+const APP_VERSION = '1.1.0';
 const CURRENCIES = ['SEK', 'EUR', 'USD', 'GBP', 'NOK', 'DKK', 'IRR', 'TRY', 'CHF', 'AED', 'CAD', 'AUD', 'JPY', 'CNY', 'INR', 'PLN'];
 const MAX_IMG = 1600;   // longest side for stored photos
 const THUMB = 360;      // longest side for thumbnails
@@ -145,6 +145,9 @@ const ICON = {
   camera: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>',
   trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg>',
   close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+  clip: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>',
+  folder: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>',
+  open: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3"/></svg>',
   share: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8M16 6l-4-4-4 4M12 2v13"/></svg>'
 };
 
@@ -164,7 +167,38 @@ function sortedBalances(m, defaultCur) {
 }
 function balanceClass(c) { return c > 0 ? 'owe' : c < 0 ? 'owed' : 'settled'; }
 
-/* ---------- Image processing ---------- */
+/* ---------- Attachments: images (downscaled) and any other file (stored as-is) ---------- */
+const DOC_ACCEPT = 'image/*,application/pdf,.pdf,.heic,.doc,.docx,.xls,.xlsx,.txt';
+const MIME_BY_EXT = {
+  pdf: 'application/pdf', txt: 'text/plain', csv: 'text/csv', rtf: 'application/rtf',
+  doc: 'application/msword', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xls: 'application/vnd.ms-excel', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  ppt: 'application/vnd.ms-powerpoint', pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  pages: 'application/vnd.apple.pages', numbers: 'application/vnd.apple.numbers', key: 'application/vnd.apple.keynote',
+  zip: 'application/zip', json: 'application/json', html: 'text/html', eml: 'message/rfc822',
+  jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp',
+  heic: 'image/heic', heif: 'image/heif', bmp: 'image/bmp', tif: 'image/tiff', tiff: 'image/tiff'
+};
+const IMAGE_EXT = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif', 'bmp'];
+const LARGE_FILE = 30 * 1024 * 1024;
+const extOf = (name) => { const m = /\.([a-z0-9]{1,8})$/i.exec(name || ''); return m ? m[1].toLowerCase() : ''; };
+const mimeOf = (file) => file.type || MIME_BY_EXT[extOf(file.name)] || 'application/octet-stream';
+const isImageAtt = (a) => !a.kind || a.kind === 'image';
+function fmtBytes(n) {
+  if (!n && n !== 0) return '?';
+  const u = ['B', 'KB', 'MB', 'GB']; let i = 0;
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return `${n.toFixed(i ? 1 : 0)} ${u[i]}`;
+}
+function fileBadge(a) {
+  const ext = (extOf(a.name) || (a.type || '').split('/').pop() || 'file').slice(0, 4).toUpperCase();
+  const t = a.type || '';
+  const cls = t === 'application/pdf' ? 'pdf' : /word|rtf|pages/.test(t) || /^(doc|docx|pages|rtf)$/i.test(ext) ? 'doc'
+    : /sheet|excel|csv|numbers/.test(t) || /^(xls|xlsx|csv|numb)$/i.test(ext) ? 'xls' : t.startsWith('image/') ? 'img' : 'gen';
+  return { ext, cls };
+}
+const attName = (a) => a.name || (isImageAtt(a) ? 'photo.jpg' : 'file');
+
 function loadImage(file) {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
@@ -179,6 +213,7 @@ function canvasToBlob(canvas, q) {
 }
 async function scaleTo(img, max) {
   const w0 = img.naturalWidth, h0 = img.naturalHeight;
+  if (!w0 || !h0) throw new Error('Image has no size');
   const scale = Math.min(1, max / Math.max(w0, h0));
   const w = Math.max(1, Math.round(w0 * scale)), h = Math.max(1, Math.round(h0 * scale));
   const c = document.createElement('canvas');
@@ -193,37 +228,54 @@ async function scaleTo(img, max) {
   c.width = c.height = 0; // free memory early on iOS
   return { blob, w, h };
 }
-/** Downscale a File to max 1600px JPEG + a thumbnail. Returns ArrayBuffers (most robust in Safari IDB). */
+/** Downscale an image File to max 1600px JPEG + a thumbnail. Images are kept as ArrayBuffers (most robust in Safari IDB). */
 async function processImage(file) {
   const { img, url } = await loadImage(file);
   try {
     const full = await scaleTo(img, MAX_IMG);
     const thumb = await scaleTo(img, THUMB);
+    const data = await full.blob.arrayBuffer();
+    const base = (file.name || 'photo').replace(/\.[^.]+$/, '');
     return {
-      data: await full.blob.arrayBuffer(), thumb: await thumb.blob.arrayBuffer(),
-      type: 'image/jpeg', width: full.w, height: full.h, name: file.name || 'photo.jpg'
+      kind: 'image', data, thumb: await thumb.blob.arrayBuffer(), type: 'image/jpeg',
+      width: full.w, height: full.h, name: base + '.jpg', size: data.byteLength
     };
   } finally { URL.revokeObjectURL(url); }
 }
-async function processFiles(files) {
+/** Non-image documents are stored unchanged as a Blob with their mime type and file name. */
+async function processDocument(file) {
+  const type = mimeOf(file);
+  // Copy the bytes into a fresh Blob: picker-backed File objects can be short-lived on iOS.
+  const data = new Blob([await file.arrayBuffer()], { type });
+  return { kind: 'file', data, type, name: file.name || 'document', size: data.size };
+}
+async function processAttachments(files) {
   const out = [];
   const list = [...files];
   for (let i = 0; i < list.length; i++) {
-    if (list.length > 1) toast(`Processing photo ${i + 1} of ${list.length}…`, 10000);
-    else toast('Processing photo…', 10000);
-    try { out.push(await processImage(list[i])); }
-    catch (err) { console.error(err); toast(err.message, 3000); }
+    const f = list[i];
+    if (f.size > LARGE_FILE && !confirm(`“${f.name}” is ${fmtBytes(f.size)}. Large files use a lot of storage and make backups big. Attach anyway?`)) continue;
+    toast(list.length > 1 ? `Adding ${i + 1} of ${list.length}…` : 'Adding…', 10000);
+    const looksImage = (f.type || '').startsWith('image/') || IMAGE_EXT.includes(extOf(f.name));
+    try {
+      if (looksImage) {
+        try { out.push(await processImage(f)); continue; }
+        catch (err) { console.warn('Image could not be decoded, storing original file', err); }
+      }
+      out.push(await processDocument(f));
+    } catch (err) { console.error(err); toast(err.message || 'Could not read file', 3000); }
   }
-  if (out.length) toast(out.length === 1 ? 'Photo added' : `${out.length} photos added`);
+  if (out.length) toast(out.length === 1 ? '1 attachment added' : `${out.length} attachments added`);
   return out;
 }
-/** Opens the native picker (camera / photo library on iPhone). */
-function pickImages() {
+/** Opens the native picker. mode: 'camera' | 'docs' (photos + documents) | 'any' (iOS Files, any type). */
+function pickFiles(mode = 'docs') {
   return new Promise((resolve) => {
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = 'image/*';
-    input.multiple = true;
+    if (mode === 'camera') { input.accept = 'image/*'; input.setAttribute('capture', 'environment'); }
+    else if (mode === 'docs') { input.accept = DOC_ACCEPT; input.multiple = true; }
+    else input.multiple = true;
     input.style.display = 'none';
     input.addEventListener('change', () => { resolve([...(input.files || [])]); input.remove(); });
     input.addEventListener('cancel', () => { resolve([]); input.remove(); });
@@ -231,15 +283,57 @@ function pickImages() {
     input.click();
   });
 }
+function attachButtonsHtml(prefix) {
+  return `<div class="attach-buttons">
+    <button type="button" class="attach-btn" data-pick="camera" id="${prefix}-camera">${ICON.camera}<span>Camera</span></button>
+    <button type="button" class="attach-btn" data-pick="docs" id="${prefix}-docs">${ICON.clip}<span>Photos &amp; docs</span></button>
+    <button type="button" class="attach-btn" data-pick="any" id="${prefix}-any">${ICON.folder}<span>Other file</span></button>
+  </div>`;
+}
+function wireAttachButtons(root, onFiles) {
+  $$('.attach-btn', root).forEach((b) => (b.onclick = async () => {
+    const files = await pickFiles(b.dataset.pick); // must be first: needs the tap's user activation
+    if (files.length) await onFiles(files);
+  }));
+}
+/** Thumbnail (images) or file tile (documents). */
+function tileHtml(a, url, { remove = null, idx = null, caption = null } = {}) {
+  const inner = isImageAtt(a)
+    ? `<img src="${url}" alt="">`
+    : (() => { const b = fileBadge(a); return `<span class="file-tile"><span class="ext ${b.cls}">${esc(b.ext)}</span><span class="fname">${esc(attName(a))}</span><span class="fsize">${esc(fmtBytes(a.size))}</span></span>`; })();
+  const tag = idx !== null ? 'button' : 'div';
+  return `<${tag} class="thumb${isImageAtt(a) ? '' : ' doc'}" ${idx !== null ? `data-idx="${idx}" aria-label="Open ${esc(attName(a))}"` : ''}>
+    ${inner}
+    ${caption ? `<span class="badge">${esc(caption)}</span>` : ''}
+    ${remove ? `<span role="button" tabindex="0" class="remove" data-key="${esc(remove)}" aria-label="Remove ${esc(attName(a))}">✕</span>` : ''}
+  </${tag}>`;
+}
+const toBlob = (data, type) => (data instanceof Blob ? data : new Blob([data], { type: type || 'application/octet-stream' }));
+async function shareOrDownload(a) {
+  const file = new File([toBlob(a.data, a.type)], attName(a), { type: a.type || 'application/octet-stream' });
+  if (navigator.canShare && navigator.share) {
+    let can = false; try { can = navigator.canShare({ files: [file] }); } catch { can = false; }
+    if (can) {
+      try { await navigator.share({ files: [file], title: attName(a) }); return; }
+      catch (err) { if (err && err.name === 'AbortError') return; }
+    }
+  }
+  const url = URL.createObjectURL(file);
+  const link = document.createElement('a');
+  link.href = url; link.download = attName(a); link.rel = 'noopener';
+  document.body.appendChild(link); link.click(); link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
 
 /* ---------- Object URL management ---------- */
 let viewUrls = [];
-function blobUrl(buf, type = 'image/jpeg', bucket = viewUrls) {
-  const u = URL.createObjectURL(new Blob([buf], { type }));
+function blobUrl(data, type = 'image/jpeg', bucket = viewUrls) {
+  const u = URL.createObjectURL(toBlob(data, type));
   bucket.push(u);
   return u;
 }
 function revokeAll(bucket) { bucket.forEach((u) => URL.revokeObjectURL(u)); bucket.length = 0; }
+const thumbFor = (a, bucket) => (isImageAtt(a) ? blobUrl(a.thumb || a.data, 'image/jpeg', bucket) : null);
 
 /* =========================== Rendering =========================== */
 const app = $('#app');
@@ -247,8 +341,23 @@ let state = { defaultCurrency: 'SEK' };
 
 function route() {
   const h = location.hash || '#/';
-  const m = h.match(/^#\/p\/([^/?]+)/);
-  return m ? { name: 'person', id: decodeURIComponent(m[1]) } : { name: 'home' };
+  const m = h.match(/^#\/p\/([^/?]+)(?:\/e\/([^/?]+))?/);
+  if (!m) return { name: 'home' };
+  return m[2] ? { name: 'entry', pid: decodeURIComponent(m[1]), eid: decodeURIComponent(m[2]) } : { name: 'person', id: decodeURIComponent(m[1]) };
+}
+const personHash = (pid) => '#/p/' + encodeURIComponent(pid);
+const entryHash = (pid, eid) => personHash(pid) + '/e/' + encodeURIComponent(eid);
+
+/* In-app navigation stack, so "Back" uses history.back() when it would land on the parent page. */
+const navStack = [location.hash || '#/'];
+function onHashNav() {
+  const h = location.hash || '#/';
+  if (navStack.length >= 2 && navStack[navStack.length - 2] === h) navStack.pop();
+  else navStack.push(h);
+}
+function goBack(parent) {
+  if (navStack.length >= 2 && navStack[navStack.length - 2] === parent) history.back();
+  else location.hash = parent;
 }
 
 let renderSeq = 0;
@@ -257,7 +366,8 @@ async function render() {
   const r = route();
   const prevUrls = viewUrls; viewUrls = [];
   try {
-    if (r.name === 'person') await renderPerson(r.id, seq);
+    if (r.name === 'entry') await renderEntry(r.pid, r.eid, seq);
+    else if (r.name === 'person') await renderPerson(r.id, seq);
     else await renderHome(seq);
   } catch (err) {
     console.error(err);
@@ -348,32 +458,36 @@ async function renderHome(seq) {
   $('#btn-add-person').onclick = () => personSheet();
   $('#btn-settings').onclick = () => settingsSheet();
   const bn = $('#btn-backup-now'); if (bn) bn.onclick = () => settingsSheet();
-  $$('.person-row').forEach((b) => (b.onclick = () => { location.hash = '#/p/' + encodeURIComponent(b.dataset.id); }));
+  $$('.person-row').forEach((b) => (b.onclick = () => { location.hash = personHash(b.dataset.id); }));
   navbarScroll();
 }
 
+function runningBalances(entries) {
+  // entries sorted newest-first -> Map(entryId -> balance in that currency after this entry)
+  const running = new Map(), after = new Map();
+  for (const e of [...entries].reverse()) {
+    const v = (running.get(e.currency) || 0) + (e.type === 'repay' ? -e.amount : e.amount);
+    running.set(e.currency, v);
+    after.set(e.id, v);
+  }
+  return after;
+}
+const sortEntries = (entries) => entries.sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.createdAt || 0) - (a.createdAt || 0));
+const entryTitle = (e) => e.description || (e.type === 'repay' ? 'Paid back' : 'Borrowed');
+
 async function renderPerson(id, seq) {
-  const [person, entries, images] = await Promise.all([getOne('people', id), getAll('entries', 'personId', id), getAll('images', 'personId', id)]);
+  const [person, entries, atts] = await Promise.all([getOne('people', id), getAll('entries', 'personId', id), getAll('images', 'personId', id)]);
   if (seq !== renderSeq) return;
   if (!person) { location.replace('#/'); return; }
   const dc = state.defaultCurrency;
-  entries.sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.createdAt || 0) - (a.createdAt || 0));
-  images.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+  sortEntries(entries);
+  atts.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
   const bal = sortedBalances(balanceOf(entries), dc);
-  const entryById = new Map(entries.map((e) => [e.id, e]));
-  const imgsByEntry = new Map();
-  for (const im of images) if (im.entryId) { if (!imgsByEntry.has(im.entryId)) imgsByEntry.set(im.entryId, []); imgsByEntry.get(im.entryId).push(im); }
-  const thumbUrl = new Map(images.map((im) => [im.id, blobUrl(im.thumb || im.data, im.type)]));
-
-  // Running balance per currency (chronological), shown under each entry.
-  const running = new Map();
-  const chrono = [...entries].reverse();
-  const runAfter = new Map();
-  for (const e of chrono) {
-    const v = (running.get(e.currency) || 0) + (e.type === 'repay' ? -e.amount : e.amount);
-    running.set(e.currency, v);
-    runAfter.set(e.id, v);
-  }
+  const entryIds = new Set(entries.map((e) => e.id));
+  const countByEntry = new Map();
+  for (const a of atts) if (a.entryId && entryIds.has(a.entryId)) countByEntry.set(a.entryId, (countByEntry.get(a.entryId) || 0) + 1);
+  const general = atts.filter((a) => !a.entryId || !entryIds.has(a.entryId));
+  const runAfter = runningBalances(entries);
 
   app.innerHTML = `
     <header class="navbar">
@@ -400,52 +514,105 @@ async function renderPerson(id, seq) {
       <div class="section-title"><span>History</span><span>${entries.length || ''}</span></div>
       ${entries.length ? `<div class="list entries" id="entries-list">
         ${entries.map((e) => {
-          const ims = imgsByEntry.get(e.id) || [];
-          const rb = runAfter.get(e.id);
+          const n = countByEntry.get(e.id) || 0;
           return `<button class="row entry-row" data-id="${esc(e.id)}">
             <span class="entry-icon ${e.type}">${e.type === 'repay' ? '↑' : '↓'}</span>
             <span class="row-main">
-              <div class="row-title">${esc(e.description || (e.type === 'repay' ? 'Paid back' : 'Borrowed'))}</div>
-              <div class="row-sub">${esc(fmtDate(e.date))} · ${e.type === 'repay' ? 'I paid back' : 'I borrowed'}</div>
-              ${ims.length ? `<div class="mini-thumbs">${ims.slice(0, 4).map((im) => `<img src="${thumbUrl.get(im.id)}" alt="">`).join('')}</div>` : ''}
+              <div class="row-title">${esc(entryTitle(e))}</div>
+              <div class="row-sub">${esc(fmtDate(e.date))} · ${e.type === 'repay' ? 'I paid back' : 'I borrowed'}${n ? ` <span class="clip-badge" data-testid="att-count" aria-label="${n} attachment${n > 1 ? 's' : ''}">${ICON.clip}${n}</span>` : ''}</div>
             </span>
             <span class="row-end ${e.type === 'repay' ? 'owed' : 'owe'}">${esc(fmtMoney(e.type === 'repay' ? -e.amount : e.amount, e.currency, { sign: true }))}
-              <small>bal. ${esc(fmtMoney(rb, e.currency))}</small></span>
+              <small>bal. ${esc(fmtMoney(runAfter.get(e.id), e.currency))}</small></span>
+            ${ICON.chev}
           </button>`;
         }).join('')}
-      </div>` : `<div class="list"><div class="empty-inline">No entries yet. Add what you borrowed or paid back.</div></div>`}
-
-      <div class="section-title"><span>Photos &amp; receipts</span><button id="btn-add-photos">Add</button></div>
-      <div class="gallery" id="gallery">
-        ${images.map((im, i) => {
-          const e = im.entryId ? entryById.get(im.entryId) : null;
-          return `<button class="thumb" data-idx="${i}" aria-label="View photo">
-            <img src="${thumbUrl.get(im.id)}" alt="" loading="lazy">
-            ${e ? `<span class="badge">${esc(e.description || fmtDate(e.date))}</span>` : ''}
-          </button>`;
-        }).join('')}
-        <button class="thumb add" id="btn-add-photos-2" aria-label="Add photos">${ICON.camera}</button>
       </div>
-      <p class="muted center mt">Photos can come from the camera or your photo library.</p>
+      <p class="muted center" style="margin:8px 16px 0">Tap a transaction to see or attach its receipts &amp; documents.</p>` : `<div class="list"><div class="empty-inline">No transactions yet. Add what you borrowed or paid back — you can attach receipts and documents to each one.</div></div>`}
+
+      <div class="section-title"><span>Other documents</span><button id="btn-add-photos">Add</button></div>
+      <p class="muted" style="margin:-2px 16px 8px">For things not tied to one transaction (e.g. an agreement).</p>
+      <div class="gallery" id="gallery">
+        ${general.map((a, i) => tileHtml(a, thumbFor(a, viewUrls), { idx: i })).join('')}
+        <button class="thumb add" id="btn-add-photos-2" aria-label="Add other documents">${ICON.plus}</button>
+      </div>
     </main>
   `;
-  $('#btn-back').onclick = () => { if (sessionStorage.getItem('navFromHome') === '1') history.back(); else location.hash = '#/'; };
+  $('#btn-back').onclick = () => goBack('#/');
   $('#btn-edit-person').onclick = () => personSheet(person);
   $('#btn-add-borrow').onclick = () => entrySheet(person, null, 'borrow');
   $('#btn-add-repay').onclick = () => entrySheet(person, null, 'repay');
   const addGeneral = async () => {
-    const files = await pickImages();
-    if (!files.length) return;
-    const processed = await processFiles(files);
-    const now = Date.now();
-    await writeOps(processed.map((p, i) => ({ store: 'images', put: { id: uid(), personId: person.id, entryId: null, createdAt: now + i, ...p } })));
-    render();
+    const files = await pickFiles('docs');
+    if (files.length) await saveAttachments(await processAttachments(files), person.id, null);
   };
   $('#btn-add-photos').onclick = addGeneral;
   $('#btn-add-photos-2').onclick = addGeneral;
-  $$('.entry-row').forEach((b) => (b.onclick = () => entrySheet(person, entryById.get(b.dataset.id))));
-  $$('#gallery .thumb[data-idx]').forEach((b) => (b.onclick = () => openViewer(images, Number(b.dataset.idx), entryById)));
+  $$('.entry-row').forEach((b) => (b.onclick = () => { location.hash = entryHash(person.id, b.dataset.id); }));
+  $$('#gallery .thumb[data-idx]').forEach((b) => (b.onclick = () => openViewer(general, Number(b.dataset.idx), new Map(entries.map((e) => [e.id, e])))));
   navbarScroll();
+}
+
+async function saveAttachments(recs, personId, entryId) {
+  if (!recs.length) return;
+  const now = Date.now();
+  await writeOps(recs.map((p, i) => ({ store: 'images', put: { id: uid(), personId, entryId, createdAt: now + i, ...p } })));
+  render();
+}
+
+async function renderEntry(pid, eid, seq) {
+  const [person, entry, atts, entries] = await Promise.all([getOne('people', pid), getOne('entries', eid), getAll('images', 'entryId', eid), getAll('entries', 'personId', pid)]);
+  if (seq !== renderSeq) return;
+  if (!person) { location.replace('#/'); return; }
+  if (!entry || entry.personId !== pid) { location.replace(personHash(pid)); return; }
+  atts.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+  const runAfter = runningBalances(sortEntries(entries));
+  const signed = entry.type === 'repay' ? -entry.amount : entry.amount;
+  const rb = runAfter.get(entry.id) || 0;
+
+  app.innerHTML = `
+    <header class="navbar">
+      <div class="nav-row">
+        <button class="nav-btn" id="btn-back" aria-label="Back to ${esc(person.name)}">${ICON.back}<span class="nav-back-label">${esc(person.name)}</span></button>
+        <span class="nav-title">Transaction</span>
+        <button class="nav-btn" id="btn-edit-entry">Edit</button>
+      </div>
+    </header>
+    <main>
+      <section class="hero person entry-hero">
+        <div class="entry-icon lg ${entry.type}">${entry.type === 'repay' ? '↑' : '↓'}</div>
+        <div class="hero-label">${entry.type === 'repay' ? 'I paid back ' : 'I borrowed from '}${esc(person.name)}</div>
+        <div class="hero-amount ${entry.type === 'repay' ? 'owed' : 'owe'}" id="entry-amount">${esc(fmtMoney(signed, entry.currency, { sign: true }))}</div>
+        <div class="entry-desc" id="entry-desc">${esc(entryTitle(entry))}</div>
+        <div class="muted">${esc(fmtDate(entry.date))} · balance after: ${esc(fmtMoney(rb, entry.currency))}${rb < 0 ? ' (owes you)' : ''}</div>
+      </section>
+
+      <div class="section-title"><span>Receipts &amp; documents</span><span id="att-total">${atts.length || ''}</span></div>
+      <div class="attach-box">
+        ${atts.length ? `<div class="gallery" id="entry-atts">${atts.map((a, i) => tileHtml(a, thumbFor(a, viewUrls), { idx: i })).join('')}</div>`
+          : `<div class="empty-inline" style="padding:6px 4px 14px">No attachments yet. Add a receipt, screenshot or document for this transaction.</div>`}
+        ${attachButtonsHtml('d')}
+      </div>
+      <button class="btn danger mt" style="width:100%" id="btn-delete-entry">${ICON.trash} Delete transaction</button>
+    </main>
+  `;
+  $('#btn-back').onclick = () => goBack(personHash(pid));
+  $('#btn-edit-entry').onclick = () => entrySheet(person, entry);
+  wireAttachButtons(app, async (files) => saveAttachments(await processAttachments(files), pid, eid));
+  $$('#entry-atts .thumb[data-idx]').forEach((b) => (b.onclick = () => openViewer(atts, Number(b.dataset.idx), new Map([[entry.id, entry]]))));
+  $('#btn-delete-entry').onclick = async () => {
+    if (!(await deleteEntry(entry, atts))) return;
+    goBack(personHash(pid));
+    render();
+  };
+  navbarScroll();
+}
+
+async function deleteEntry(entry, atts) {
+  const n = atts.length;
+  if (!confirm(`Delete this transaction${n ? ` and its ${n} attachment${n > 1 ? 's' : ''}` : ''}?`)) return false;
+  await writeOps([{ store: 'entries', del: entry.id }, ...atts.map((a) => ({ store: 'images', del: a.id }))]);
+  toast('Transaction deleted');
+  return true;
 }
 
 /* =========================== Sheets =========================== */
@@ -525,7 +692,7 @@ function personSheet(person = null) {
       const rec = editing ? { ...person, name, note, updatedAt: now } : { id: uid(), name, note, createdAt: now, updatedAt: now };
       await writeOps([{ store: 'people', put: rec }]);
       closeSheet();
-      if (!editing) { sessionStorage.setItem('navFromHome', '1'); location.hash = '#/p/' + encodeURIComponent(rec.id); }
+      if (!editing) location.hash = personHash(rec.id);
       else render();
     }
   });
@@ -545,14 +712,14 @@ async function entrySheet(person, entry = null, defaultType = 'borrow') {
   const existing = editing ? (await getAll('images', 'entryId', entry.id)).sort((a, b) => a.createdAt - b.createdAt) : [];
   const sheetUrls = [];
   let type = entry?.type || defaultType;
-  const pending = [];          // newly processed images, not yet saved
-  const removed = new Set();   // ids of existing images to delete on save
+  const pending = [];          // newly added attachments, saved together with the transaction
+  const removed = new Set();   // ids of existing attachments to delete on save
   const lastCur = await getMeta('lastCurrency:' + person.id, null);
   const currency = entry?.currency || lastCur || state.defaultCurrency;
   const amountStr = editing ? (entry.amount / 100).toLocaleString(undefined, { useGrouping: false, maximumFractionDigits: 2 }) : '';
 
   const ov = openSheet({
-    title: editing ? 'Edit entry' : 'New entry',
+    title: editing ? 'Edit transaction' : 'New transaction',
     right: 'Save',
     body: `
       <div class="segmented" role="tablist">
@@ -569,9 +736,13 @@ async function entrySheet(person, entry = null, defaultType = 'borrow') {
         <div class="field"><label for="e-desc">Description</label><input id="e-desc" type="text" placeholder="What for?" maxlength="140" value="${esc(entry?.description || '')}" enterkeyhint="done"></div>
         <div class="field"><label for="e-date">Date</label><input id="e-date" type="date" value="${esc(entry?.date || todayISO())}"></div>
       </div>
-      <div class="form-label">Photos for this entry</div>
-      <div class="gallery" id="e-gallery"></div>
-      ${editing ? `<button class="btn danger mt" style="width:100%" id="e-delete">${ICON.trash} Delete entry</button>` : ''}
+      <div class="form-label">Attach documents</div>
+      <div class="attach-box" id="e-attach">
+        <div class="gallery" id="e-gallery"></div>
+        ${attachButtonsHtml('e')}
+        <p class="muted center" style="margin:10px 0 0">Receipts, screenshots, PDFs, Word/Excel files… saved with this transaction.</p>
+      </div>
+      ${editing ? `<button class="btn danger mt" style="width:100%" id="e-delete">${ICON.trash} Delete transaction</button>` : ''}
     `,
     onMount: (ov) => {
       $$('.segmented button', ov).forEach((b) => (b.onclick = () => {
@@ -581,11 +752,9 @@ async function entrySheet(person, entry = null, defaultType = 'borrow') {
       if (!editing) setTimeout(() => $('#e-amount', ov).focus(), 50);
       const del = $('#e-delete', ov);
       if (del) del.onclick = async () => {
-        const n = existing.length;
-        if (!confirm(`Delete this entry${n ? ` and its ${n} photo${n > 1 ? 's' : ''}` : ''}?`)) return;
-        await writeOps([{ store: 'entries', del: entry.id }, ...existing.map((im) => ({ store: 'images', del: im.id }))]);
+        if (!(await deleteEntry(entry, existing))) return;
         closeSheet();
-        toast('Entry deleted');
+        if (route().name === 'entry') goBack(personHash(person.id));
         render();
       };
     },
@@ -603,44 +772,43 @@ async function entrySheet(person, entry = null, defaultType = 'borrow') {
       };
       await writeOps([
         { store: 'entries', put: rec },
-        ...pending.map((p, i) => ({ store: 'images', put: { id: uid(), personId: person.id, entryId: rec.id, createdAt: now + i, ...p.img } })),
+        ...pending.map((p, i) => ({ store: 'images', put: { id: uid(), personId: person.id, entryId: rec.id, createdAt: now + i, ...p.rec } })),
         ...[...removed].map((id) => ({ store: 'images', del: id })),
         { store: 'meta', put: { key: 'lastCurrency:' + person.id, value: cur } }
       ]);
       closeSheet();
-      toast(editing ? 'Entry updated' : 'Entry added');
+      const n = pending.length;
+      toast(editing ? 'Transaction updated' : `Transaction added${n ? ` with ${n} attachment${n > 1 ? 's' : ''}` : ''}`);
       render();
     }
   });
   ov._cleanup = () => revokeAll(sheetUrls);
 
   const gal = $('#e-gallery', ov);
-  const thumbs = existing.map((im) => ({ id: im.id, url: blobUrl(im.thumb || im.data, im.type, sheetUrls) }));
+  const shown = existing.map((a) => ({ a, url: thumbFor(a, sheetUrls) }));
   function drawGallery() {
     const items = [
-      ...thumbs.filter((t) => !removed.has(t.id)).map((t) => ({ key: 'x:' + t.id, url: t.url })),
-      ...pending.map((p, i) => ({ key: 'p:' + i, url: p.url }))
+      ...shown.filter((t) => !removed.has(t.a.id)).map((t) => ({ key: 'x:' + t.a.id, a: t.a, url: t.url })),
+      ...pending.map((p, i) => ({ key: 'p:' + i, a: p.rec, url: p.url }))
     ];
-    gal.innerHTML = items.map((it) => `<div class="thumb"><img src="${it.url}" alt=""><button class="remove" data-key="${esc(it.key)}" aria-label="Remove photo">✕</button></div>`).join('') +
-      `<button class="thumb add" id="e-add-photo" aria-label="Add photos">${ICON.camera}</button>`;
+    gal.innerHTML = items.map((it) => tileHtml(it.a, it.url, { remove: it.key })).join('');
+    gal.classList.toggle('hidden', !items.length);
     $$('.remove', gal).forEach((b) => (b.onclick = () => {
-      const [k, v] = [b.dataset.key.slice(0, 1), b.dataset.key.slice(2)];
+      const k = b.dataset.key.slice(0, 1), v = b.dataset.key.slice(2);
       if (k === 'x') removed.add(v); else pending.splice(Number(v), 1);
       drawGallery();
     }));
-    $('#e-add-photo', gal).onclick = async () => {
-      const files = await pickImages();
-      if (!files.length) return;
-      const processed = await processFiles(files);
-      for (const img of processed) pending.push({ img, url: blobUrl(img.thumb, img.type, sheetUrls) });
-      if (sheetEl === ov) drawGallery();
-    };
   }
+  wireAttachButtons($('#e-attach', ov), async (files) => {
+    const recs = await processAttachments(files);
+    for (const rec of recs) pending.push({ rec, url: thumbFor(rec, sheetUrls) });
+    if (sheetEl === ov) drawGallery();
+  });
   drawGallery();
 }
 
-/* ---------- Full-screen image viewer ---------- */
-function openViewer(images, index, entryById) {
+/* ---------- Full-screen viewer for images and documents ---------- */
+function openViewer(items, index, entryById) {
   const urls = [];
   let i = index;
   const v = document.createElement('div');
@@ -650,37 +818,62 @@ function openViewer(images, index, entryById) {
     <div class="viewer-bar">
       <button class="nav-btn" data-act="close" aria-label="Close">${ICON.close}</button>
       <span class="viewer-count"></span>
-      <button class="nav-btn del" data-act="delete" aria-label="Delete photo">${ICON.trash}</button>
+      <button class="nav-btn del" data-act="delete" aria-label="Delete attachment">${ICON.trash}</button>
     </div>
-    <div class="viewer-stage"><img alt="Photo"></div>
-    <div class="viewer-caption"></div>`;
+    <div class="viewer-stage"></div>
+    <div class="viewer-caption"></div>
+    <div class="viewer-actions">
+      <button class="viewer-btn" data-act="share">${ICON.share}<span>Share / Save</span></button>
+      <a class="viewer-btn" data-act="open" target="_blank" rel="noopener">${ICON.open}<span>Open</span></a>
+    </div>`;
   document.body.appendChild(v);
   document.body.style.overflow = 'hidden';
-  const img = $('img', v);
+  const stage = $('.viewer-stage', v);
+  function fileCard(a, msg) {
+    const b = fileBadge(a);
+    return `<div class="viewer-file"><span class="ext big ${b.cls}">${esc(b.ext)}</span>
+      <div class="vf-name">${esc(attName(a))}</div><div class="vf-meta">${esc(fmtBytes(a.size))} · ${esc(a.type || 'unknown type')}</div>
+      <p>${esc(msg)}</p></div>`;
+  }
   function show() {
-    const im = images[i];
+    const a = items[i];
     revokeAll(urls);
-    img.src = blobUrl(im.data, im.type, urls);
-    $('.viewer-count', v).textContent = images.length > 1 ? `${i + 1} of ${images.length}` : '';
-    const e = im.entryId ? entryById.get(im.entryId) : null;
-    $('.viewer-caption', v).textContent = e
-      ? `${e.description || (e.type === 'repay' ? 'Paid back' : 'Borrowed')} · ${fmtDate(e.date)} · ${fmtMoney(e.amount, e.currency)}`
-      : `General photo · added ${new Date(im.createdAt).toLocaleDateString()}`;
+    const url = blobUrl(a.data, a.type, urls);
+    const t = a.type || '';
+    if (isImageAtt(a)) {
+      stage.innerHTML = `<img alt="${esc(attName(a))}" src="${url}">`;
+    } else if (t === 'application/pdf' || t === 'text/plain') {
+      stage.innerHTML = `<iframe class="doc-frame" title="${esc(attName(a))}" src="${url}"></iframe>`;
+    } else if (t.startsWith('image/')) {
+      stage.innerHTML = `<img alt="${esc(attName(a))}" src="${url}">`;
+      $('img', stage).onerror = () => { stage.innerHTML = fileCard(a, 'This image format can’t be previewed here. Use Share / Save to open it in another app.'); };
+    } else {
+      stage.innerHTML = fileCard(a, 'No preview for this file type. Use Share / Save to open it in another app or save it to Files.');
+    }
+    const openA = $('[data-act="open"]', v);
+    openA.href = url;
+    openA.classList.toggle('hidden', isImageAtt(a));
+    $('.viewer-count', v).textContent = items.length > 1 ? `${i + 1} of ${items.length}` : '';
+    const e = a.entryId ? entryById.get(a.entryId) : null;
+    $('.viewer-caption', v).textContent = (isImageAtt(a) ? '' : attName(a) + ' · ') + (e
+      ? `${entryTitle(e)} · ${fmtDate(e.date)} · ${fmtMoney(e.amount, e.currency)}`
+      : `Added ${new Date(a.createdAt).toLocaleDateString()}`);
   }
   function close() { revokeAll(urls); v.remove(); document.body.style.overflow = sheetEl ? 'hidden' : ''; document.removeEventListener('keydown', onKey); }
-  const step = (d) => { if (images.length > 1) { i = (i + d + images.length) % images.length; show(); } };
+  const step = (d) => { if (items.length > 1) { i = (i + d + items.length) % items.length; show(); } };
   function onKey(e) { if (e.key === 'Escape') close(); if (e.key === 'ArrowRight') step(1); if (e.key === 'ArrowLeft') step(-1); }
   document.addEventListener('keydown', onKey);
   $('[data-act="close"]', v).onclick = close;
+  $('[data-act="share"]', v).onclick = () => shareOrDownload(items[i]);
   $('[data-act="delete"]', v).onclick = async () => {
-    if (!confirm('Delete this photo?')) return;
-    await writeOps([{ store: 'images', del: images[i].id }]);
-    images.splice(i, 1);
-    toast('Photo deleted');
-    if (!images.length) { close(); render(); return; }
-    i = Math.min(i, images.length - 1);
-    show();
+    if (!confirm(`Delete “${attName(items[i])}”?`)) return;
+    await writeOps([{ store: 'images', del: items[i].id }]);
+    items.splice(i, 1);
+    toast('Attachment deleted');
     render();
+    if (!items.length) { close(); return; }
+    i = Math.min(i, items.length - 1);
+    show();
   };
   // Swipe left/right to navigate, swipe down to close.
   let sx = 0, sy = 0, multi = false;
@@ -718,17 +911,23 @@ async function buildExport() {
   const [people, entries, images, meta] = await Promise.all([getAll('people'), getAll('entries'), getAll('images'), getAll('meta')]);
   const data = {
     app: 'how-much-i-owe',
-    format: 1,
+    format: 2, // 2 = attachments may be any file (kind:'file', stored as Blob); format 1 = images only
     appVersion: APP_VERSION,
     exportedAt: new Date().toISOString(),
     settings: Object.fromEntries(meta.filter((m) => m.key !== 'lastBackup').map((m) => [m.key, m.value])),
     people, entries,
-    images: images.map(({ data, thumb, ...rest }) => ({
-      ...rest,
-      data: `data:${rest.type || 'image/jpeg'};base64,${bufToB64(data)}`,
-      thumb: thumb ? `data:image/jpeg;base64,${bufToB64(thumb)}` : undefined
-    }))
+    images: []
   };
+  for (const { data: bytes, thumb, ...rest } of images) {
+    const kind = isImageAtt(rest) ? 'image' : 'file';
+    const type = rest.type || (kind === 'image' ? 'image/jpeg' : 'application/octet-stream');
+    const buf = bytes instanceof Blob ? await bytes.arrayBuffer() : bytes;
+    data.images.push({
+      ...rest, kind, type, name: attName(rest), size: buf.byteLength,
+      data: `data:${type};base64,${bufToB64(buf)}`,
+      thumb: thumb ? `data:image/jpeg;base64,${bufToB64(thumb)}` : undefined
+    });
+  }
   const json = JSON.stringify(data);
   const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
   return { json, filename: `how-much-i-owe-backup-${stamp}.json`, counts: { people: people.length, entries: entries.length, images: images.length } };
@@ -743,9 +942,17 @@ async function importData(text) {
   const entries = (data.entries || []).filter((e) => e && e.id && pids.has(e.personId)).map((e) => ({
     ...e, amount: Math.round(Number(e.amount)) || 0, currency: String(e.currency || 'SEK').toUpperCase(), type: e.type === 'repay' ? 'repay' : 'borrow'
   }));
+  const eids = new Set(entries.map((e) => e.id));
+  // Backwards compatible: format-1 backups only had images (no "kind").
   const images = (data.images || []).filter((im) => im && im.id && pids.has(im.personId) && im.data).map((im) => {
     const full = dataUrlToBuf(im.data);
-    return { ...im, data: full, thumb: im.thumb ? dataUrlToBuf(im.thumb) : full, type: im.type || 'image/jpeg' };
+    const entryId = im.entryId && eids.has(im.entryId) ? im.entryId : null;
+    if (im.kind === 'file') {
+      const type = im.type || (/^data:([^;,]+)/.exec(im.data) || [])[1] || 'application/octet-stream';
+      const { thumb, ...rest } = im;
+      return { ...rest, entryId, kind: 'file', type, name: im.name || 'document', data: new Blob([full], { type }), size: full.byteLength };
+    }
+    return { ...im, entryId, kind: 'image', data: full, thumb: im.thumb ? dataUrlToBuf(im.thumb) : full, type: im.type || 'image/jpeg', name: im.name || 'photo.jpg', size: im.size || full.byteLength };
   });
   const db = await openDB();
   const t = db.transaction(['people', 'entries', 'images', 'meta'], 'readwrite');
@@ -759,13 +966,6 @@ async function importData(text) {
   await txDone(t);
   if (data.settings && data.settings.defaultCurrency) state.defaultCurrency = data.settings.defaultCurrency;
   return { people: people.length, entries: entries.length, images: images.length };
-}
-
-function fmtBytes(n) {
-  if (!n && n !== 0) return '?';
-  const u = ['B', 'KB', 'MB', 'GB']; let i = 0;
-  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
-  return `${n.toFixed(i ? 1 : 0)} ${u[i]}`;
 }
 
 async function settingsSheet() {
@@ -837,7 +1037,7 @@ async function settingsSheet() {
           b.innerHTML = `${ICON.share} Export backup (.json)`;
           saveBtn.classList.remove('hidden');
           saveBtn.innerHTML = `${ICON.share} Save backup file (${fmtBytes(prepared.json.length)})`;
-          $('#s-counts', ov).textContent = `Backup contains ${c.people} people, ${c.entries} entries and ${c.images} photos.`;
+          $('#s-counts', ov).textContent = `Backup contains ${c.people} people, ${c.entries} transactions and ${c.images} attachments.`;
           saveBtn.classList.add('primary'); b.classList.remove('primary');
           saveBtn.onclick = deliver;
           toast('Backup ready – tap “Save backup”');
@@ -853,12 +1053,12 @@ async function settingsSheet() {
           const f = input.files && input.files[0];
           input.remove();
           if (!f) return;
-          if (!confirm('Importing replaces ALL current people, entries and photos with the backup. Continue?')) return;
+          if (!confirm('Importing replaces ALL current people, transactions and attachments with the backup. Continue?')) return;
           try {
             toast('Importing…', 10000);
             const c = await importData(await f.text());
             closeSheet();
-            toast(`Imported ${c.people} people, ${c.entries} entries, ${c.images} photos`, 3000);
+            toast(`Imported ${c.people} people, ${c.entries} transactions, ${c.images} attachments`, 3000);
             location.hash = '#/';
             render();
           } catch (err) { console.error(err); toast(err.message, 4000); }
@@ -874,11 +1074,7 @@ async function settingsSheet() {
 // Expose a tiny API for tests / debugging.
 window.oweApp = { parseAmount, balanceOf, buildExport, importData, version: APP_VERSION };
 
-window.addEventListener('hashchange', () => { closeSheet(); if (route().name === 'home') sessionStorage.removeItem('navFromHome'); render(); window.scrollTo(0, 0); });
-document.addEventListener('click', (e) => {
-  const row = e.target.closest && e.target.closest('.person-row');
-  if (row) sessionStorage.setItem('navFromHome', '1');
-}, true);
+window.addEventListener('hashchange', () => { onHashNav(); closeSheet(); render(); window.scrollTo(0, 0); });
 
 async function boot() {
   try {
@@ -895,6 +1091,14 @@ async function boot() {
 
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
   window.addEventListener('load', () => navigator.serviceWorker.register('service-worker.js').catch((err) => console.warn('SW registration failed', err)));
+  // When an updated service worker takes over a page that was already controlled, reload once to pick up the new files.
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController || reloaded || sheetEl) return;
+    reloaded = true;
+    location.reload();
+  });
 }
 boot();
 })();

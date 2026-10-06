@@ -1,5 +1,5 @@
 /* How Much I Owe – service worker: caches the app shell for offline use. */
-const VERSION = 'v1.0.0';
+const VERSION = 'v1.1.0';
 const CACHE = `owe-shell-${VERSION}`;
 const SHELL = [
   './',
@@ -47,17 +47,17 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Static assets: stale-while-revalidate.
+  // App assets: network first (fresh after deploys), falling back to the cache when offline or slow.
   event.respondWith(
-    caches.match(req, { ignoreSearch: true }).then((cached) => {
-      const network = fetch(req).then((res) => {
+    Promise.race([
+      fetch(req).then((res) => {
         if (res && res.ok && res.type === 'basic') {
           const copy = res.clone();
           caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
         }
         return res;
-      }).catch(() => cached);
-      return cached || network;
-    })
+      }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 4000))
+    ]).catch(() => caches.match(req, { ignoreSearch: true }).then((r) => r || fetch(req)))
   );
 });

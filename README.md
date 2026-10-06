@@ -14,6 +14,12 @@ like https://user.github.io/owe-app/ works.
 ## Install on iPhone
 Open the URL in Safari → Share → **Add to Home Screen**. It then runs full-screen and offline.
 
+## Attachments
+Each transaction has an **Attach documents** area (Camera · Photos & docs · Other file). Photos are
+downscaled to max 1600px JPEG; PDFs and other documents are stored unchanged. Tap a transaction to
+see its attachments, preview them, Share/Save them, or delete them. Per-person "Other documents"
+are still available for things not tied to one transaction.
+
 ## Backups
 iOS can clear web-app storage. Use ⚙︎ → **Export backup** → **Save backup file** (share sheet →
 Save to Files / iCloud Drive). **Import backup** replaces all current data with the file.
