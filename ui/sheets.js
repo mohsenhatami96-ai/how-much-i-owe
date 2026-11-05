@@ -3,6 +3,14 @@ import { createPerson, updatePerson } from '../domain/people.js';
 import { createEntry, updateEntry } from '../domain/entries.js';
 import { parseAmount } from '../domain/money.js';
 import { $, $$, esc, ICON, toast } from './dom.js';
+import {
+  attachButtonsHtml,
+  wireAttachButtons,
+  processAttachments,
+  tileHtml,
+  thumbFor,
+  revokeAll,
+} from './images.js';
 
 let sheetEl = null;
 export const getSheetEl = () => sheetEl;
@@ -104,7 +112,7 @@ export function personSheet(deps, person = null) {
 }
 
 /**
- * Entry sheet. Attachment gallery deps injected (Task 6 will own those).
+ * Entry sheet.
  * @param {object} deps
  * @param {object} person
  * @param {object|null} entry
@@ -113,8 +121,7 @@ export function personSheet(deps, person = null) {
 export async function entrySheet(deps, person, entry = null, defaultType = 'borrow') {
   const {
     attachmentRepo, metaRepo, state, currencies, writeOps, uid, todayISO,
-    attachButtonsHtml, wireAttachButtons, processAttachments, tileHtml, thumbFor,
-    deleteEntry, route, goBack, personHash, render, revokeAll,
+    deleteEntry, route, goBack, personHash, render,
   } = deps;
   const editing = !!entry;
   const existing = editing ? (await attachmentRepo.listByEntry(entry.id)).sort((a, b) => a.createdAt - b.createdAt) : [];
@@ -216,7 +223,7 @@ export async function entrySheet(deps, person, entry = null, defaultType = 'borr
     }));
   }
   wireAttachButtons($('#e-attach', ov), async (files) => {
-    const recs = await processAttachments(files);
+    const recs = await processAttachments(files, state);
     for (const rec of recs) pending.push({ rec, url: thumbFor(rec, sheetUrls) });
     if (sheetEl === ov) drawGallery();
   });

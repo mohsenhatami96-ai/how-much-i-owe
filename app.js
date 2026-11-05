@@ -1,8 +1,13 @@
 /* How Much I Owe – a local-first PWA for tracking money you owe.
  * Data lives in IndexedDB on the device. No backend, no build step. */
 import { parseAmount, fmtMoney } from './domain/money.js';
-import { balanceOf, runningBalances } from './domain/balances.js';
-import { entryTitle, sortEntries } from './domain/entries.js';
+import { balanceOf } from './domain/balances.js';
+import {
+  PHOTO_MODES,
+  isImageAtt,
+  attName,
+  fmtBytes,
+} from './domain/attachments.js';
 import {
   openDB,
   writeOps,
@@ -10,7 +15,7 @@ import {
   createRepos,
   setBlockedHandler,
 } from './storage/indexeddb.js';
-import { $, $$, esc, fmtDate, toast, ICON, navbarScroll } from './ui/dom.js';
+import { $, esc, toast, ICON, navbarScroll } from './ui/dom.js';
 import { renderHome as renderHomeView } from './ui/home.js';
 import { renderPerson as renderPersonView } from './ui/person.js';
 import {
@@ -21,13 +26,19 @@ import {
   personSheet as personSheetView,
   entrySheet as entrySheetView,
 } from './ui/sheets.js';
+import {
+  processImage,
+  canEncodeWebP,
+  revokeAll,
+} from './ui/images.js';
+import { renderEntry as renderEntryView } from './ui/entry.js';
+import { openViewer as openViewerView } from './ui/viewer.js';
 
 (() => {
 'use strict';
 
 const APP_VERSION = '1.2.0';
 const CURRENCIES = ['SEK', 'EUR', 'USD', 'GBP', 'NOK', 'DKK', 'IRR', 'TRY', 'CHF', 'AED', 'CAD', 'AUD', 'JPY', 'CNY', 'INR', 'PLN'];
-const THUMB = 360;      // longest side for thumbnails (kept separately from the stored photo)
 
 /* =========================== IndexedDB (via storage/indexeddb.js) =========================== */
 const repos = createRepos();
@@ -43,241 +54,8 @@ setBlockedHandler((msg) => toast(msg));
 
 /* =========================== Domain =========================== */
 
-/* ---------- Attachments: images (downscaled) and any other file (stored as-is) ---------- */
-const DOC_ACCEPT = 'image/*,application/pdf,.pdf,.heic,.doc,.docx,.xls,.xlsx,.txt';
-const MIME_BY_EXT = {
-  pdf: 'application/pdf', txt: 'text/plain', csv: 'text/csv', rtf: 'application/rtf',
-  doc: 'application/msword', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  xls: 'application/vnd.ms-excel', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  ppt: 'application/vnd.ms-powerpoint', pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-  pages: 'application/vnd.apple.pages', numbers: 'application/vnd.apple.numbers', key: 'application/vnd.apple.keynote',
-  zip: 'application/zip', json: 'application/json', html: 'text/html', eml: 'message/rfc822',
-  jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp',
-  heic: 'image/heic', heif: 'image/heif', bmp: 'image/bmp', tif: 'image/tiff', tiff: 'image/tiff'
-};
-const IMAGE_EXT = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif', 'bmp'];
-const LARGE_FILE = 30 * 1024 * 1024;
-const extOf = (name) => { const m = /\.([a-z0-9]{1,8})$/i.exec(name || ''); return m ? m[1].toLowerCase() : ''; };
-const mimeOf = (file) => file.type || MIME_BY_EXT[extOf(file.name)] || 'application/octet-stream';
-const isImageAtt = (a) => !a.kind || a.kind === 'image';
-function fmtBytes(n) {
-  if (!n && n !== 0) return '?';
-  const u = ['B', 'KB', 'MB', 'GB']; let i = 0;
-  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
-  return `${n.toFixed(i ? 1 : 0)} ${u[i]}`;
-}
-function fileBadge(a) {
-  const ext = (extOf(a.name) || (a.type || '').split('/').pop() || 'file').slice(0, 4).toUpperCase();
-  const t = a.type || '';
-  const cls = t === 'application/pdf' ? 'pdf' : /word|rtf|pages/.test(t) || /^(doc|docx|pages|rtf)$/i.test(ext) ? 'doc'
-    : /sheet|excel|csv|numbers/.test(t) || /^(xls|xlsx|csv|numb)$/i.test(ext) ? 'xls' : t.startsWith('image/') ? 'img' : 'gen';
-  return { ext, cls };
-}
-const attName = (a) => a.name || (isImageAtt(a) ? 'photo.jpg' : 'file');
-
-function loadImage(file) {
-  return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(file);
-    const img = new Image();
-    img.onload = () => resolve({ img, url });
-    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Could not read image: ' + (file.name || 'unknown'))); };
-    img.src = url;
-  });
-}
-/* ---------- Photo compression ----------
- * Goal: keep small receipt / screenshot text crisp while saving space.
- * - never upscale; long side capped per quality mode
- * - high-quality step-down (halving) resampling
- * - WebP when the browser can encode it (checked via toBlob result type), else JPEG
- * - PNG screenshots: lossy (q≈0.9) vs. PNG, smallest wins
- * - never store something bigger than the original (original kept instead)
- * - EXIF orientation is applied by the browser when decoding (<img>, image-orientation: from-image) */
-const PHOTO_MODES = {
-  high: { label: 'High detail', max: 2560, q: 0.82, pngQ: 0.9, hint: 'Up to 2560 px. Keeps small receipt text sharp and usually saves 90%+ of the space.' },
-  balanced: { label: 'Balanced', max: 2048, q: 0.78, pngQ: 0.85, hint: 'Up to 2048 px. Smaller files, text still readable.' },
-  original: { label: 'Original', max: Infinity, hint: 'No compression. Uses the most storage and makes backups big.' }
-};
-const DISPLAYABLE = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
-let webpProbe = null;
-function canEncodeWebP() {
-  if (!webpProbe) webpProbe = new Promise((resolve) => {
-    try {
-      const c = document.createElement('canvas'); c.width = c.height = 4;
-      c.getContext('2d').fillRect(0, 0, 4, 4);
-      c.toBlob((b) => resolve(!!b && b.type === 'image/webp'), 'image/webp', 0.8);
-    } catch { resolve(false); }
-  });
-  return webpProbe;
-}
-function encodeCanvas(canvas, type, q) {
-  return new Promise((resolve) => {
-    try { canvas.toBlob((b) => resolve(b && b.type === type ? b : null), type, q); } catch { resolve(null); }
-  });
-}
-const fitSize = (w, h, max) => { const s = Math.min(1, max / Math.max(w, h)); return [Math.max(1, Math.round(w * s)), Math.max(1, Math.round(h * s))]; };
-/** High-quality resample: halve repeatedly while >= 2× the target, then one final smooth draw. */
-function drawScaled(src, sw, sh, w, h, background = '#fff') {
-  let cur = src, cw = sw, ch = sh;
-  const temps = [];
-  while (cw >= w * 2 && ch >= h * 2) {
-    const nw = Math.round(cw / 2), nh = Math.round(ch / 2);
-    const t = document.createElement('canvas'); t.width = nw; t.height = nh;
-    const tc = t.getContext('2d'); tc.imageSmoothingEnabled = true; tc.imageSmoothingQuality = 'high';
-    tc.drawImage(cur, 0, 0, cw, ch, 0, 0, nw, nh);
-    temps.push(t); cur = t; cw = nw; ch = nh;
-  }
-  const c = document.createElement('canvas'); c.width = w; c.height = h;
-  const ctx = c.getContext('2d');
-  if (background) { ctx.fillStyle = background; ctx.fillRect(0, 0, w, h); }
-  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(cur, 0, 0, cw, ch, 0, 0, w, h);
-  temps.forEach((t) => { t.width = t.height = 0; }); // free memory early on iOS
-  return c;
-}
-const freeCanvas = (c) => { c.width = c.height = 0; };
-const EXT_BY_TYPE = { 'image/webp': 'webp', 'image/jpeg': 'jpg', 'image/png': 'png', 'image/gif': 'gif' };
-
-/** Compress a photo/screenshot. opts.format forces the lossy output type (used by tests). */
-async function processImage(file, mode = state.photoQuality, opts = {}) {
-  const cfg = PHOTO_MODES[mode] || PHOTO_MODES.high;
-  const { img, url } = await loadImage(file);
-  try {
-    const w0 = img.naturalWidth, h0 = img.naturalHeight; // already EXIF-oriented
-    if (!w0 || !h0) throw new Error('Image has no size');
-    const origType = mimeOf(file);
-    const origBuf = await file.arrayBuffer();
-    const keepable = DISPLAYABLE.includes(origType);
-
-    const [tw, th] = fitSize(w0, h0, THUMB);
-    const tc = drawScaled(img, w0, h0, tw, th);
-    const thumbBlob = await encodeCanvas(tc, 'image/jpeg', 0.8);
-    freeCanvas(tc);
-
-    let best = null; // { blob, w, h }
-    if (mode !== 'original' || !keepable) {
-      const [w, h] = mode === 'original' ? [w0, h0] : fitSize(w0, h0, cfg.max);
-      const c = drawScaled(img, w0, h0, w, h);
-      const lossy = opts.format || ((await canEncodeWebP()) ? 'image/webp' : 'image/jpeg');
-      const isPng = origType === 'image/png';
-      const q = mode === 'original' ? 0.92 : isPng ? cfg.pngQ : cfg.q;
-      const cands = [await encodeCanvas(c, lossy, q)];
-      if (lossy !== 'image/jpeg' && !cands[0]) cands.push(await encodeCanvas(c, 'image/jpeg', q));
-      if (isPng && (w !== w0 || h !== h0)) cands.push(await encodeCanvas(c, 'image/png'));
-      freeCanvas(c);
-      for (const b of cands) if (b && (!best || b.size < best.blob.size)) best = { blob: b, w, h };
-      if (!best) throw new Error('Image encoding failed');
-    }
-    let data, type, width, height, keptOriginal = false;
-    if (keepable && (!best || origBuf.byteLength <= best.blob.size)) {
-      data = origBuf; type = origType; width = w0; height = h0; keptOriginal = true;
-    } else {
-      data = await best.blob.arrayBuffer(); type = best.blob.type; width = best.w; height = best.h;
-    }
-    const base = (file.name || 'photo').replace(/\.[^.]+$/, '');
-    return {
-      kind: 'image', data, thumb: thumbBlob ? await thumbBlob.arrayBuffer() : null, type, width, height,
-      name: `${base}.${EXT_BY_TYPE[type] || extOf(file.name) || 'img'}`, size: data.byteLength,
-      origSize: origBuf.byteLength, origType, origWidth: w0, origHeight: h0, photoMode: mode, keptOriginal
-    };
-  } finally { URL.revokeObjectURL(url); }
-}
-/** Non-image documents are stored unchanged as a Blob with their mime type and file name. */
-async function processDocument(file) {
-  const type = mimeOf(file);
-  // Copy the bytes into a fresh Blob: picker-backed File objects can be short-lived on iOS.
-  const data = new Blob([await file.arrayBuffer()], { type });
-  return { kind: 'file', data, type, name: file.name || 'document', size: data.size };
-}
-async function processAttachments(files) {
-  const out = [];
-  const list = [...files];
-  for (let i = 0; i < list.length; i++) {
-    const f = list[i];
-    if (f.size > LARGE_FILE && !confirm(`“${f.name}” is ${fmtBytes(f.size)}. Large files use a lot of storage and make backups big. Attach anyway?`)) continue;
-    toast(list.length > 1 ? `Adding ${i + 1} of ${list.length}…` : 'Adding…', 10000);
-    const looksImage = (f.type || '').startsWith('image/') || IMAGE_EXT.includes(extOf(f.name));
-    try {
-      if (looksImage) {
-        try { out.push(await processImage(f)); continue; }
-        catch (err) { console.warn('Image could not be decoded, storing original file', err); }
-      }
-      out.push(await processDocument(f));
-    } catch (err) { console.error(err); toast(err.message || 'Could not read file', 3000); }
-  }
-  if (out.length) {
-    const imgs = out.filter((a) => a.kind === 'image' && a.origSize);
-    const before = imgs.reduce((n, a) => n + a.origSize, 0), after = imgs.reduce((n, a) => n + a.size, 0);
-    const what = out.length === 1 ? (imgs.length ? 'Photo saved' : 'File attached') : `${out.length} attachments saved`;
-    toast(imgs.length ? `${what} · ${fmtBytes(before)} → ${fmtBytes(after)}` : what, 3200);
-  }
-  return out;
-}
-/** Opens the native picker. mode: 'camera' | 'docs' (photos + documents) | 'any' (iOS Files, any type). */
-function pickFiles(mode = 'docs') {
-  return new Promise((resolve) => {
-    const input = document.createElement('input');
-    input.type = 'file';
-    if (mode === 'camera') { input.accept = 'image/*'; input.setAttribute('capture', 'environment'); }
-    else if (mode === 'docs') { input.accept = DOC_ACCEPT; input.multiple = true; }
-    else input.multiple = true;
-    input.style.display = 'none';
-    input.addEventListener('change', () => { resolve([...(input.files || [])]); input.remove(); });
-    input.addEventListener('cancel', () => { resolve([]); input.remove(); });
-    document.body.appendChild(input);
-    input.click();
-  });
-}
-function attachButtonsHtml(prefix) {
-  return `<div class="attach-buttons">
-    <button type="button" class="attach-btn" data-pick="camera" id="${prefix}-camera">${ICON.camera}<span>Camera</span></button>
-    <button type="button" class="attach-btn" data-pick="docs" id="${prefix}-docs">${ICON.clip}<span>Photos &amp; docs</span></button>
-    <button type="button" class="attach-btn" data-pick="any" id="${prefix}-any">${ICON.folder}<span>Other file</span></button>
-  </div>`;
-}
-function wireAttachButtons(root, onFiles) {
-  $$('.attach-btn', root).forEach((b) => (b.onclick = async () => {
-    const files = await pickFiles(b.dataset.pick); // must be first: needs the tap's user activation
-    if (files.length) await onFiles(files);
-  }));
-}
-/** Thumbnail (images) or file tile (documents). */
-function tileHtml(a, url, { remove = null, idx = null, caption = null } = {}) {
-  const inner = isImageAtt(a)
-    ? `<img src="${url}" alt="">`
-    : (() => { const b = fileBadge(a); return `<span class="file-tile"><span class="ext ${b.cls}">${esc(b.ext)}</span><span class="fname">${esc(attName(a))}</span><span class="fsize">${esc(fmtBytes(a.size))}</span></span>`; })();
-  const tag = idx !== null ? 'button' : 'div';
-  return `<${tag} class="thumb${isImageAtt(a) ? '' : ' doc'}" ${idx !== null ? `data-idx="${idx}" aria-label="Open ${esc(attName(a))}"` : ''}>
-    ${inner}
-    ${caption ? `<span class="badge">${esc(caption)}</span>` : ''}
-    ${remove ? `<span role="button" tabindex="0" class="remove" data-key="${esc(remove)}" aria-label="Remove ${esc(attName(a))}">✕</span>` : ''}
-  </${tag}>`;
-}
-const toBlob = (data, type) => (data instanceof Blob ? data : new Blob([data], { type: type || 'application/octet-stream' }));
-async function shareOrDownload(a) {
-  const file = new File([toBlob(a.data, a.type)], attName(a), { type: a.type || 'application/octet-stream' });
-  if (navigator.canShare && navigator.share) {
-    let can = false; try { can = navigator.canShare({ files: [file] }); } catch { can = false; }
-    if (can) {
-      try { await navigator.share({ files: [file], title: attName(a) }); return; }
-      catch (err) { if (err && err.name === 'AbortError') return; }
-    }
-  }
-  const url = URL.createObjectURL(file);
-  const link = document.createElement('a');
-  link.href = url; link.download = attName(a); link.rel = 'noopener';
-  document.body.appendChild(link); link.click(); link.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 60000);
-}
-
-/* ---------- Object URL management ---------- */
+/* ---------- Object URL bucket (owned by composition root) ---------- */
 let viewUrls = [];
-function blobUrl(data, type = 'image/jpeg', bucket = viewUrls) {
-  const u = URL.createObjectURL(toBlob(data, type));
-  bucket.push(u);
-  return u;
-}
-function revokeAll(bucket) { bucket.forEach((u) => URL.revokeObjectURL(u)); bucket.length = 0; }
-const thumbFor = (a, bucket) => (isImageAtt(a) ? (a.thumb ? blobUrl(a.thumb, 'image/jpeg', bucket) : blobUrl(a.data, a.type, bucket)) : null);
 
 /* =========================== Rendering =========================== */
 const app = $('#app');
@@ -334,7 +112,7 @@ function personDeps() {
   return {
     peopleRepo, entryRepo, attachmentRepo, state, app, renderSeq,
     personSheet, entrySheet, goBack, entryHash,
-    tileHtml, thumbFor, viewUrls, pickFiles, processAttachments, saveAttachments, openViewer,
+    viewUrls, saveAttachments, openViewer,
   };
 }
 async function renderPerson(id, seq) { return renderPersonView(personDeps(), id, seq); }
@@ -348,8 +126,7 @@ function personSheet(person = null) {
 function entrySheet(person, entry = null, defaultType = 'borrow') {
   return entrySheetView({
     attachmentRepo, metaRepo, state, currencies: CURRENCIES, writeOps, uid, todayISO,
-    attachButtonsHtml, wireAttachButtons, processAttachments, tileHtml, thumbFor,
-    deleteEntry, route, goBack, personHash, render, revokeAll,
+    deleteEntry, route, goBack, personHash, render,
   }, person, entry, defaultType);
 }
 
@@ -369,52 +146,14 @@ async function saveAttachments(recs, personId, entryId) {
   render();
 }
 
-async function renderEntry(pid, eid, seq) {
-  const [person, entry, atts, entries] = await Promise.all([peopleRepo.get(pid), entryRepo.get(eid), attachmentRepo.listByEntry(eid), entryRepo.listByPerson(pid)]);
-  if (seq !== renderSeq) return;
-  if (!person) { location.replace('#/'); return; }
-  if (!entry || entry.personId !== pid) { location.replace(personHash(pid)); return; }
-  atts.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
-  const runAfter = runningBalances(sortEntries(entries));
-  const signed = entry.type === 'repay' ? -entry.amount : entry.amount;
-  const rb = runAfter.get(entry.id) || 0;
-
-  app.innerHTML = `
-    <header class="navbar">
-      <div class="nav-row">
-        <button class="nav-btn" id="btn-back" aria-label="Back to ${esc(person.name)}">${ICON.back}<span class="nav-back-label">${esc(person.name)}</span></button>
-        <span class="nav-title">Transaction</span>
-        <button class="nav-btn" id="btn-edit-entry">Edit</button>
-      </div>
-    </header>
-    <main>
-      <section class="hero person entry-hero">
-        <div class="entry-icon lg ${entry.type}">${entry.type === 'repay' ? '↑' : '↓'}</div>
-        <div class="hero-label">${entry.type === 'repay' ? 'I paid back ' : 'I borrowed from '}${esc(person.name)}</div>
-        <div class="hero-amount ${entry.type === 'repay' ? 'owed' : 'owe'}" id="entry-amount">${esc(fmtMoney(signed, entry.currency, { sign: true }))}</div>
-        <div class="entry-desc" id="entry-desc">${esc(entryTitle(entry))}</div>
-        <div class="muted">${esc(fmtDate(entry.date))} · balance after: ${esc(fmtMoney(rb, entry.currency))}${rb < 0 ? ' (owes you)' : ''}</div>
-      </section>
-
-      <div class="section-title"><span>Receipts &amp; documents</span><span id="att-total">${atts.length || ''}</span></div>
-      <div class="attach-box">
-        ${atts.length ? `<div class="gallery" id="entry-atts">${atts.map((a, i) => tileHtml(a, thumbFor(a, viewUrls), { idx: i })).join('')}</div>`
-          : `<div class="empty-inline" style="padding:6px 4px 14px">No attachments yet. Add a receipt, screenshot or document for this transaction.</div>`}
-        ${attachButtonsHtml('d')}
-      </div>
-      <button class="btn danger mt" style="width:100%" id="btn-delete-entry">${ICON.trash} Delete transaction</button>
-    </main>
-  `;
-  $('#btn-back').onclick = () => goBack(personHash(pid));
-  $('#btn-edit-entry').onclick = () => entrySheet(person, entry);
-  wireAttachButtons(app, async (files) => saveAttachments(await processAttachments(files), pid, eid));
-  $$('#entry-atts .thumb[data-idx]').forEach((b) => (b.onclick = () => openViewer(atts, Number(b.dataset.idx), new Map([[entry.id, entry]]))));
-  $('#btn-delete-entry').onclick = async () => {
-    if (!(await deleteEntry(entry, atts))) return;
-    goBack(personHash(pid));
-    render();
+function entryDeps() {
+  return {
+    peopleRepo, entryRepo, attachmentRepo, state, app, renderSeq,
+    viewUrls, personHash, goBack, entrySheet, deleteEntry, saveAttachments, openViewer, render,
   };
-  navbarScroll();
+}
+async function renderEntry(pid, eid, seq) {
+  return renderEntryView(entryDeps(), pid, eid, seq);
 }
 
 async function deleteEntry(entry, atts) {
@@ -437,98 +176,9 @@ async function deletePerson(id) {
 }
 
 
-/* ---------- Full-screen viewer for images and documents ---------- */
+/* ---------- Full-screen viewer ---------- */
 function openViewer(items, index, entryById) {
-  const urls = [];
-  let i = index;
-  const v = document.createElement('div');
-  v.className = 'viewer';
-  v.setAttribute('role', 'dialog');
-  v.innerHTML = `
-    <div class="viewer-bar">
-      <button class="nav-btn" data-act="close" aria-label="Close">${ICON.close}</button>
-      <span class="viewer-count"></span>
-      <button class="nav-btn del" data-act="delete" aria-label="Delete attachment">${ICON.trash}</button>
-    </div>
-    <div class="viewer-stage"></div>
-    <div class="viewer-caption"></div>
-    <div class="viewer-actions">
-      <button class="viewer-btn" data-act="share">${ICON.share}<span>Share / Save</span></button>
-      <a class="viewer-btn" data-act="open" target="_blank" rel="noopener">${ICON.open}<span>Open</span></a>
-    </div>`;
-  document.body.appendChild(v);
-  document.body.style.overflow = 'hidden';
-  const stage = $('.viewer-stage', v);
-  function fileCard(a, msg) {
-    const b = fileBadge(a);
-    return `<div class="viewer-file"><span class="ext big ${b.cls}">${esc(b.ext)}</span>
-      <div class="vf-name">${esc(attName(a))}</div><div class="vf-meta">${esc(fmtBytes(a.size))} · ${esc(a.type || 'unknown type')}</div>
-      <p>${esc(msg)}</p></div>`;
-  }
-  function show() {
-    const a = items[i];
-    revokeAll(urls);
-    const url = blobUrl(a.data, a.type, urls);
-    const t = a.type || '';
-    stage.classList.remove('zoom');
-    if (isImageAtt(a)) {
-      stage.innerHTML = `<img alt="${esc(attName(a))}" src="${url}" title="Tap to zoom">`;
-      const im = $('img', stage);
-      // Tap toggles between fit-to-screen and ~100% detail (1 image px = 1 device px on 2× screens).
-      im.onclick = (ev) => {
-        const r = im.getBoundingClientRect(); // measure the fitted size before switching modes
-        const zoomed = stage.classList.toggle('zoom');
-        if (!zoomed) { im.style.width = ''; return; }
-        const fx = (ev.clientX - r.left) / r.width, fy = (ev.clientY - r.top) / r.height;
-        im.style.width = Math.max(r.width, im.naturalWidth / 2) + 'px';
-        requestAnimationFrame(() => {
-          stage.scrollLeft = fx * im.offsetWidth - stage.clientWidth / 2;
-          stage.scrollTop = fy * im.offsetHeight - stage.clientHeight / 2;
-        });
-      };
-    } else if (t === 'application/pdf' || t === 'text/plain') {
-      stage.innerHTML = `<iframe class="doc-frame" title="${esc(attName(a))}" src="${url}"></iframe>`;
-    } else if (t.startsWith('image/')) {
-      stage.innerHTML = `<img alt="${esc(attName(a))}" src="${url}">`;
-      $('img', stage).onerror = () => { stage.innerHTML = fileCard(a, 'This image format can’t be previewed here. Use Share / Save to open it in another app.'); };
-    } else {
-      stage.innerHTML = fileCard(a, 'No preview for this file type. Use Share / Save to open it in another app or save it to Files.');
-    }
-    const openA = $('[data-act="open"]', v);
-    openA.href = url;
-    openA.classList.toggle('hidden', isImageAtt(a));
-    $('.viewer-count', v).textContent = items.length > 1 ? `${i + 1} of ${items.length}` : '';
-    const e = a.entryId ? entryById.get(a.entryId) : null;
-    $('.viewer-caption', v).textContent = (isImageAtt(a) ? '' : attName(a) + ' · ') + (e
-      ? `${entryTitle(e)} · ${fmtDate(e.date)} · ${fmtMoney(e.amount, e.currency)}`
-      : `Added ${new Date(a.createdAt).toLocaleDateString()}`);
-  }
-  function close() { revokeAll(urls); v.remove(); document.body.style.overflow = getSheetEl() ? 'hidden' : ''; document.removeEventListener('keydown', onKey); }
-  const step = (d) => { if (items.length > 1) { i = (i + d + items.length) % items.length; show(); } };
-  function onKey(e) { if (e.key === 'Escape') close(); if (e.key === 'ArrowRight') step(1); if (e.key === 'ArrowLeft') step(-1); }
-  document.addEventListener('keydown', onKey);
-  $('[data-act="close"]', v).onclick = close;
-  $('[data-act="share"]', v).onclick = () => shareOrDownload(items[i]);
-  $('[data-act="delete"]', v).onclick = async () => {
-    if (!confirm(`Delete “${attName(items[i])}”?`)) return;
-    await attachmentRepo.delete(items[i].id);
-    items.splice(i, 1);
-    toast('Attachment deleted');
-    render();
-    if (!items.length) { close(); return; }
-    i = Math.min(i, items.length - 1);
-    show();
-  };
-  // Swipe left/right to navigate, swipe down to close.
-  let sx = 0, sy = 0, multi = false;
-  v.addEventListener('touchstart', (e) => { multi = e.touches.length > 1; sx = e.touches[0].clientX; sy = e.touches[0].clientY; }, { passive: true });
-  v.addEventListener('touchend', (e) => {
-    if (multi || stage.classList.contains('zoom')) return;
-    const t = e.changedTouches[0], dx = t.clientX - sx, dy = t.clientY - sy;
-    if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy)) step(dx < 0 ? 1 : -1);
-    else if (dy > 110 && Math.abs(dy) > Math.abs(dx)) close();
-  }, { passive: true });
-  show();
+  return openViewerView({ attachmentRepo, render }, items, index, entryById);
 }
 
 /* ---------- Settings, export & import ---------- */
@@ -743,7 +393,11 @@ async function settingsSheet() {
 
 /* =========================== Boot =========================== */
 // Expose a tiny API for tests / debugging.
-window.oweApp = { parseAmount, balanceOf, buildExport, importData, processImage, canEncodeWebP, PHOTO_MODES, version: APP_VERSION };
+window.oweApp = {
+  parseAmount, balanceOf, buildExport, importData,
+  processImage: (file, mode, opts) => processImage(file, mode ?? state.photoQuality, opts),
+  canEncodeWebP, PHOTO_MODES, version: APP_VERSION
+};
 
 window.addEventListener('hashchange', () => { onHashNav(); closeSheet(); render(); window.scrollTo(0, 0); });
 

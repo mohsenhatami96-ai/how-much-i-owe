@@ -3,9 +3,10 @@ import { entryTitle, sortEntries } from '../domain/entries.js';
 import { balanceOf, sortedBalances, runningBalances, balanceClass } from '../domain/balances.js';
 import { fmtMoney } from '../domain/money.js';
 import { $, $$, esc, ICON, fmtDate, navbarScroll } from './dom.js';
+import { tileHtml, thumbFor, pickFiles, processAttachments } from './images.js';
 
 /**
- * Person screen. Attachment helpers (tileHtml, thumbFor, pickFiles, …) stay injected until Task 6.
+ * Person screen.
  * @param {object} deps
  * @param {string} id
  * @param {number} seq
@@ -14,7 +15,7 @@ export async function renderPerson(deps, id, seq) {
   const {
     peopleRepo, entryRepo, attachmentRepo, state, app, renderSeq,
     personSheet, entrySheet, goBack, entryHash,
-    tileHtml, thumbFor, viewUrls, pickFiles, processAttachments, saveAttachments, openViewer,
+    viewUrls, saveAttachments, openViewer,
   } = deps;
   const [person, entries, atts] = await Promise.all([peopleRepo.get(id), entryRepo.listByPerson(id), attachmentRepo.listByPerson(id)]);
   if (seq !== renderSeq) return;
@@ -83,7 +84,7 @@ export async function renderPerson(deps, id, seq) {
   $('#btn-add-repay').onclick = () => entrySheet(person, null, 'repay');
   const addGeneral = async () => {
     const files = await pickFiles('docs');
-    if (files.length) await saveAttachments(await processAttachments(files), person.id, null);
+    if (files.length) await saveAttachments(await processAttachments(files, state), person.id, null);
   };
   $('#btn-add-photos').onclick = addGeneral;
   $('#btn-add-photos-2').onclick = addGeneral;
