@@ -1,6 +1,7 @@
 /* How Much I Owe – a local-first PWA for tracking money you owe.
  * Data lives in IndexedDB on the device. No backend, no build step. */
 import { parseAmount, fmtMoney } from './domain/money.js';
+import { balanceOf, sortedBalances, runningBalances, balanceClass } from './domain/balances.js';
 
 (() => {
 'use strict';
@@ -118,20 +119,7 @@ const ICON = {
 };
 
 /* =========================== Domain =========================== */
-/** Returns Map(currency -> cents). Positive = I owe them. */
-function balanceOf(entries) {
-  const m = new Map();
-  for (const e of entries) {
-    const v = e.type === 'repay' ? -e.amount : e.amount;
-    m.set(e.currency, (m.get(e.currency) || 0) + v);
-  }
-  for (const [k, v] of m) if (v === 0) m.delete(k);
-  return m;
-}
-function sortedBalances(m, defaultCur) {
-  return [...m.entries()].sort((a, b) => (a[0] === defaultCur ? -1 : b[0] === defaultCur ? 1 : a[0].localeCompare(b[0])));
-}
-function balanceClass(c) { return c > 0 ? 'owe' : c < 0 ? 'owed' : 'settled'; }
+/* balanceOf / sortedBalances / balanceClass → domain/balances.js */
 
 /* ---------- Attachments: images (downscaled) and any other file (stored as-is) ---------- */
 const DOC_ACCEPT = 'image/*,application/pdf,.pdf,.heic,.doc,.docx,.xls,.xlsx,.txt';
@@ -496,16 +484,7 @@ async function renderHome(seq) {
   navbarScroll();
 }
 
-function runningBalances(entries) {
-  // entries sorted newest-first -> Map(entryId -> balance in that currency after this entry)
-  const running = new Map(), after = new Map();
-  for (const e of [...entries].reverse()) {
-    const v = (running.get(e.currency) || 0) + (e.type === 'repay' ? -e.amount : e.amount);
-    running.set(e.currency, v);
-    after.set(e.id, v);
-  }
-  return after;
-}
+/* runningBalances → domain/balances.js */
 const sortEntries = (entries) => entries.sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.createdAt || 0) - (a.createdAt || 0));
 const entryTitle = (e) => e.description || (e.type === 'repay' ? 'Paid back' : 'Borrowed');
 
