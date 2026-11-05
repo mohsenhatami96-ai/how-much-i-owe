@@ -1,6 +1,7 @@
 /* How Much I Owe – a local-first PWA for tracking money you owe.
- * Data lives in IndexedDB on the device. No backend, no build step. */
-import { parseAmount, fmtMoney } from './domain/money.js';
+ * Data lives in IndexedDB on the device. No backend, no build step.
+ * Composition root: wires ports, UI, and boot. */
+import { parseAmount } from './domain/money.js';
 import { balanceOf } from './domain/balances.js';
 import { PHOTO_MODES } from './domain/attachments.js';
 import {
@@ -8,7 +9,8 @@ import {
   createRepos,
   setBlockedHandler,
 } from './storage/indexeddb.js';
-import { $, esc, toast, ICON, navbarScroll } from './ui/dom.js';
+import { $, esc, toast, navbarScroll } from './ui/dom.js';
+import { route, personHash, entryHash, onHashNav, goBack } from './ui/router.js';
 import { renderHome as renderHomeView } from './ui/home.js';
 import { renderPerson as renderPersonView } from './ui/person.js';
 import {
@@ -33,50 +35,21 @@ import {
 (() => {
 'use strict';
 
-const APP_VERSION = '1.2.0';
+const APP_VERSION = '1.3.0';
 const CURRENCIES = ['SEK', 'EUR', 'USD', 'GBP', 'NOK', 'DKK', 'IRR', 'TRY', 'CHF', 'AED', 'CAD', 'AUD', 'JPY', 'CNY', 'INR', 'PLN'];
 
-/* =========================== IndexedDB (via storage/indexeddb.js) =========================== */
 const repos = createRepos();
 const { people: peopleRepo, entries: entryRepo, attachments: attachmentRepo, meta: metaRepo } = repos;
 
-/* =========================== Utilities =========================== */
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2, 10));
 const todayISO = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); };
 
 setBlockedHandler((msg) => toast(msg));
 
-
-
-/* =========================== Domain =========================== */
-
-/* ---------- Object URL bucket (owned by composition root) ---------- */
 let viewUrls = [];
 
-/* =========================== Rendering =========================== */
 const app = $('#app');
 let state = { defaultCurrency: 'SEK', photoQuality: 'high' };
-
-function route() {
-  const h = location.hash || '#/';
-  const m = h.match(/^#\/p\/([^/?]+)(?:\/e\/([^/?]+))?/);
-  if (!m) return { name: 'home' };
-  return m[2] ? { name: 'entry', pid: decodeURIComponent(m[1]), eid: decodeURIComponent(m[2]) } : { name: 'person', id: decodeURIComponent(m[1]) };
-}
-const personHash = (pid) => '#/p/' + encodeURIComponent(pid);
-const entryHash = (pid, eid) => personHash(pid) + '/e/' + encodeURIComponent(eid);
-
-/* In-app navigation stack, so "Back" uses history.back() when it would land on the parent page. */
-const navStack = [location.hash || '#/'];
-function onHashNav() {
-  const h = location.hash || '#/';
-  if (navStack.length >= 2 && navStack[navStack.length - 2] === h) navStack.pop();
-  else navStack.push(h);
-}
-function goBack(parent) {
-  if (navStack.length >= 2 && navStack[navStack.length - 2] === parent) history.back();
-  else location.hash = parent;
-}
 
 let renderSeq = 0;
 async function render() {
@@ -151,8 +124,6 @@ async function deleteEntry(entry, atts) {
   return true;
 }
 
-
-
 async function deletePerson(id) {
   const [entries, images] = await Promise.all([entryRepo.listByPerson(id), attachmentRepo.listByPerson(id)]);
   await writeOps([
@@ -162,13 +133,10 @@ async function deletePerson(id) {
   ]);
 }
 
-
-/* ---------- Full-screen viewer ---------- */
 function openViewer(items, index, entryById) {
   return openViewerView({ attachmentRepo, render }, items, index, entryById);
 }
 
-/* ---------- Settings, export & import ---------- */
 function settingsDeps() {
   return {
     peopleRepo, entryRepo, attachmentRepo, metaRepo,
@@ -187,8 +155,6 @@ async function importData(text) {
   return importDataView(text, { state });
 }
 
-/* =========================== Boot =========================== */
-// Expose a tiny API for tests / debugging.
 window.oweApp = {
   parseAmount, balanceOf, buildExport, importData,
   processImage: (file, mode, opts) => processImage(file, mode ?? state.photoQuality, opts),
@@ -208,13 +174,11 @@ async function boot() {
     return;
   }
   await render();
-  // Ask the browser not to evict our data (best effort; Safari decides heuristically).
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
 }
 
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
   window.addEventListener('load', () => navigator.serviceWorker.register('service-worker.js').catch((err) => console.warn('SW registration failed', err)));
-  // When an updated service worker takes over a page that was already controlled, reload once to pick up the new files.
   const hadController = !!navigator.serviceWorker.controller;
   let reloaded = false;
   navigator.serviceWorker.addEventListener('controllerchange', () => {

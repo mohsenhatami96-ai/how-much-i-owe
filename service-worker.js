@@ -1,12 +1,30 @@
 /* How Much I Owe – service worker: caches the app shell for offline use. */
-const VERSION = 'v1.2.0';
+const VERSION = 'v1.3.0';
 const CACHE = `owe-shell-${VERSION}`;
 const SHELL = [
   './',
   './index.html',
   './app.js',
   './styles.css',
+  './service-worker.js',
   './manifest.webmanifest',
+  './domain/attachments.js',
+  './domain/backup.js',
+  './domain/balances.js',
+  './domain/entries.js',
+  './domain/money.js',
+  './domain/people.js',
+  './domain/ports.js',
+  './storage/indexeddb.js',
+  './ui/dom.js',
+  './ui/entry.js',
+  './ui/home.js',
+  './ui/images.js',
+  './ui/person.js',
+  './ui/router.js',
+  './ui/settings.js',
+  './ui/sheets.js',
+  './ui/viewer.js',
   './icons/apple-touch-icon.png',
   './icons/icon-192.png',
   './icons/icon-512.png'
