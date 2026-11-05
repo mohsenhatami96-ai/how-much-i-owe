@@ -2,6 +2,13 @@
  * Data lives in IndexedDB on the device. No backend, no build step. */
 import { parseAmount, fmtMoney } from './domain/money.js';
 import { balanceOf, sortedBalances, runningBalances, balanceClass } from './domain/balances.js';
+import {
+  openDB,
+  writeOps,
+  txDone,
+  createRepos,
+  setBlockedHandler,
+} from './storage/indexeddb.js';
 
 (() => {
 'use strict';
@@ -10,68 +17,9 @@ const APP_VERSION = '1.2.0';
 const CURRENCIES = ['SEK', 'EUR', 'USD', 'GBP', 'NOK', 'DKK', 'IRR', 'TRY', 'CHF', 'AED', 'CAD', 'AUD', 'JPY', 'CNY', 'INR', 'PLN'];
 const THUMB = 360;      // longest side for thumbnails (kept separately from the stored photo)
 
-/* =========================== IndexedDB =========================== */
-const DB_NAME = 'how-much-i-owe';
-const DB_VERSION = 1;
-let dbPromise = null;
-
-function openDB() {
-  if (dbPromise) return dbPromise;
-  dbPromise = new Promise((resolve, reject) => {
-    const r = indexedDB.open(DB_NAME, DB_VERSION);
-    r.onupgradeneeded = () => {
-      const db = r.result;
-      if (!db.objectStoreNames.contains('people')) db.createObjectStore('people', { keyPath: 'id' });
-      if (!db.objectStoreNames.contains('entries')) {
-        const s = db.createObjectStore('entries', { keyPath: 'id' });
-        s.createIndex('personId', 'personId');
-      }
-      if (!db.objectStoreNames.contains('images')) {
-        const s = db.createObjectStore('images', { keyPath: 'id' });
-        s.createIndex('personId', 'personId');
-        s.createIndex('entryId', 'entryId');
-      }
-      if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta', { keyPath: 'key' });
-    };
-    r.onsuccess = () => {
-      const db = r.result;
-      db.onversionchange = () => { db.close(); location.reload(); };
-      resolve(db);
-    };
-    r.onerror = () => reject(r.error);
-    r.onblocked = () => toast('Close other tabs of this app to finish updating.');
-  });
-  return dbPromise;
-}
-const reqP = (r) => new Promise((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
-const txDone = (t) => new Promise((res, rej) => { t.oncomplete = () => res(); t.onerror = () => rej(t.error); t.onabort = () => rej(t.error || new Error('Transaction aborted')); });
-
-async function getAll(store, index, key) {
-  const db = await openDB();
-  const s = db.transaction(store, 'readonly').objectStore(store);
-  return reqP(index ? s.index(index).getAll(key) : s.getAll());
-}
-async function getOne(store, key) {
-  const db = await openDB();
-  return reqP(db.transaction(store, 'readonly').objectStore(store).get(key));
-}
-/** Run a set of writes in one transaction. ops: [{store, put}|{store, del}] */
-async function writeOps(ops) {
-  if (!ops.length) return;
-  const db = await openDB();
-  const stores = [...new Set(ops.map((o) => o.store))];
-  const t = db.transaction(stores, 'readwrite');
-  for (const o of ops) {
-    const s = t.objectStore(o.store);
-    if (o.put !== undefined) s.put(o.put); else s.delete(o.del);
-  }
-  return txDone(t);
-}
-async function getMeta(key, fallback) {
-  const r = await getOne('meta', key);
-  return r ? r.value : fallback;
-}
-const setMeta = (key, value) => writeOps([{ store: 'meta', put: { key, value } }]);
+/* =========================== IndexedDB (via storage/indexeddb.js) =========================== */
+const repos = createRepos();
+const { people: peopleRepo, entries: entryRepo, attachments: attachmentRepo, meta: metaRepo } = repos;
 
 /* =========================== Utilities =========================== */
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -103,6 +51,8 @@ function toast(msg, ms = 2200) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => t.classList.remove('show'), ms);
 }
+setBlockedHandler((msg) => toast(msg));
+
 
 const ICON = {
   back: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>',
@@ -405,7 +355,7 @@ function navbarScroll() {
 window.addEventListener('scroll', navbarScroll, { passive: true });
 
 async function renderHome(seq) {
-  const [people, entries, lastBackup] = await Promise.all([getAll('people'), getAll('entries'), getMeta('lastBackup', null)]);
+  const [people, entries, lastBackup] = await Promise.all([peopleRepo.list(), entryRepo.list(), metaRepo.get('lastBackup', null)]);
   if (seq !== renderSeq) return;
   const byPerson = new Map(people.map((p) => [p.id, []]));
   for (const e of entries) if (byPerson.has(e.personId)) byPerson.get(e.personId).push(e);
@@ -489,7 +439,7 @@ const sortEntries = (entries) => entries.sort((a, b) => (b.date || '').localeCom
 const entryTitle = (e) => e.description || (e.type === 'repay' ? 'Paid back' : 'Borrowed');
 
 async function renderPerson(id, seq) {
-  const [person, entries, atts] = await Promise.all([getOne('people', id), getAll('entries', 'personId', id), getAll('images', 'personId', id)]);
+  const [person, entries, atts] = await Promise.all([peopleRepo.get(id), entryRepo.listByPerson(id), attachmentRepo.listByPerson(id)]);
   if (seq !== renderSeq) return;
   if (!person) { location.replace('#/'); return; }
   const dc = state.defaultCurrency;
@@ -573,7 +523,7 @@ async function saveAttachments(recs, personId, entryId) {
 }
 
 async function renderEntry(pid, eid, seq) {
-  const [person, entry, atts, entries] = await Promise.all([getOne('people', pid), getOne('entries', eid), getAll('images', 'entryId', eid), getAll('entries', 'personId', pid)]);
+  const [person, entry, atts, entries] = await Promise.all([peopleRepo.get(pid), entryRepo.get(eid), attachmentRepo.listByEntry(eid), entryRepo.listByPerson(pid)]);
   if (seq !== renderSeq) return;
   if (!person) { location.replace('#/'); return; }
   if (!entry || entry.personId !== pid) { location.replace(personHash(pid)); return; }
@@ -703,7 +653,7 @@ function personSheet(person = null) {
       if (!name) { toast('Please enter a name'); $('#p-name', ov).focus(); return; }
       const now = Date.now();
       const rec = editing ? { ...person, name, note, updatedAt: now } : { id: uid(), name, note, createdAt: now, updatedAt: now };
-      await writeOps([{ store: 'people', put: rec }]);
+      await peopleRepo.put(rec);
       closeSheet();
       if (!editing) location.hash = personHash(rec.id);
       else render();
@@ -712,7 +662,7 @@ function personSheet(person = null) {
 }
 
 async function deletePerson(id) {
-  const [entries, images] = await Promise.all([getAll('entries', 'personId', id), getAll('images', 'personId', id)]);
+  const [entries, images] = await Promise.all([entryRepo.listByPerson(id), attachmentRepo.listByPerson(id)]);
   await writeOps([
     { store: 'people', del: id },
     ...entries.map((e) => ({ store: 'entries', del: e.id })),
@@ -722,12 +672,12 @@ async function deletePerson(id) {
 
 async function entrySheet(person, entry = null, defaultType = 'borrow') {
   const editing = !!entry;
-  const existing = editing ? (await getAll('images', 'entryId', entry.id)).sort((a, b) => a.createdAt - b.createdAt) : [];
+  const existing = editing ? (await attachmentRepo.listByEntry(entry.id)).sort((a, b) => a.createdAt - b.createdAt) : [];
   const sheetUrls = [];
   let type = entry?.type || defaultType;
   const pending = [];          // newly added attachments, saved together with the transaction
   const removed = new Set();   // ids of existing attachments to delete on save
-  const lastCur = await getMeta('lastCurrency:' + person.id, null);
+  const lastCur = await metaRepo.get('lastCurrency:' + person.id, null);
   const currency = entry?.currency || lastCur || state.defaultCurrency;
   const amountStr = editing ? (entry.amount / 100).toLocaleString(undefined, { useGrouping: false, maximumFractionDigits: 2 }) : '';
 
@@ -894,7 +844,7 @@ function openViewer(items, index, entryById) {
   $('[data-act="share"]', v).onclick = () => shareOrDownload(items[i]);
   $('[data-act="delete"]', v).onclick = async () => {
     if (!confirm(`Delete “${attName(items[i])}”?`)) return;
-    await writeOps([{ store: 'images', del: items[i].id }]);
+    await attachmentRepo.delete(items[i].id);
     items.splice(i, 1);
     toast('Attachment deleted');
     render();
@@ -935,7 +885,7 @@ function dataUrlToBuf(v) {
 }
 
 async function buildExport() {
-  const [people, entries, images, meta] = await Promise.all([getAll('people'), getAll('entries'), getAll('images'), getAll('meta')]);
+  const [people, entries, images, meta] = await Promise.all([peopleRepo.list(), entryRepo.list(), attachmentRepo.list(), metaRepo.list()]);
   const data = {
     app: 'how-much-i-owe',
     format: 2, // 2 = attachments may be any file (kind:'file', stored as Blob); format 1 = images only
@@ -997,7 +947,7 @@ async function importData(text) {
 }
 
 async function attachmentStats() {
-  const all = await getAll('images');
+  const all = await attachmentRepo.list();
   let bytes = 0, photos = 0, files = 0, origBytes = 0, photoBytes = 0;
   for (const a of all) {
     const size = a.data instanceof Blob ? a.data.size : (a.data ? a.data.byteLength : 0);
@@ -1010,7 +960,7 @@ async function attachmentStats() {
 
 async function settingsSheet() {
   const [lastBackup, persisted, est, st] = await Promise.all([
-    getMeta('lastBackup', null),
+    metaRepo.get('lastBackup', null),
     navigator.storage && navigator.storage.persisted ? navigator.storage.persisted().catch(() => false) : false,
     navigator.storage && navigator.storage.estimate ? navigator.storage.estimate().catch(() => null) : null,
     attachmentStats()
@@ -1052,13 +1002,13 @@ async function settingsSheet() {
     onMount: (ov) => {
       $('#s-cur', ov).onchange = async (e) => {
         state.defaultCurrency = e.target.value;
-        await setMeta('defaultCurrency', state.defaultCurrency);
+        await metaRepo.set('defaultCurrency', state.defaultCurrency);
         toast(`Default currency: ${state.defaultCurrency}`);
         render();
       };
       $('#s-photo', ov).onchange = async (e) => {
         state.photoQuality = e.target.value;
-        await setMeta('photoQuality', state.photoQuality);
+        await metaRepo.set('photoQuality', state.photoQuality);
         $('#s-photo-hint', ov).textContent = PHOTO_MODES[state.photoQuality].hint + ' Applies to new photos.';
         toast(`Photo quality: ${PHOTO_MODES[state.photoQuality].label}`);
       };
@@ -1078,7 +1028,7 @@ async function settingsSheet() {
           document.body.appendChild(a); a.click(); a.remove();
           setTimeout(() => URL.revokeObjectURL(url), 60000);
         }
-        await setMeta('lastBackup', Date.now());
+        await metaRepo.set('lastBackup', Date.now());
         $('#s-last', ov).textContent = new Date().toLocaleString();
         toast('Backup saved');
       };
@@ -1132,8 +1082,8 @@ window.addEventListener('hashchange', () => { onHashNav(); closeSheet(); render(
 
 async function boot() {
   try {
-    state.defaultCurrency = await getMeta('defaultCurrency', 'SEK');
-    state.photoQuality = await getMeta('photoQuality', 'high');
+    state.defaultCurrency = await metaRepo.get('defaultCurrency', 'SEK');
+    state.photoQuality = await metaRepo.get('photoQuality', 'high');
     if (!PHOTO_MODES[state.photoQuality]) state.photoQuality = 'high';
   } catch (err) {
     console.error(err);

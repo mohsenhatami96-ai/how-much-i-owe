@@ -1,5 +1,8 @@
 {
   "name": "how-much-i-owe",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "devDependencies": {
+    "fake-indexeddb": "^6.2.7"
+  }
 }
