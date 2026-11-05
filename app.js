@@ -1,7 +1,8 @@
 /* How Much I Owe – a local-first PWA for tracking money you owe.
  * Data lives in IndexedDB on the device. No backend, no build step. */
 import { parseAmount, fmtMoney } from './domain/money.js';
-import { balanceOf, sortedBalances, runningBalances, balanceClass } from './domain/balances.js';
+import { balanceOf, runningBalances } from './domain/balances.js';
+import { entryTitle, sortEntries } from './domain/entries.js';
 import {
   openDB,
   writeOps,
@@ -9,6 +10,17 @@ import {
   createRepos,
   setBlockedHandler,
 } from './storage/indexeddb.js';
+import { $, $$, esc, fmtDate, toast, ICON, navbarScroll } from './ui/dom.js';
+import { renderHome as renderHomeView } from './ui/home.js';
+import { renderPerson as renderPersonView } from './ui/person.js';
+import {
+  openSheet,
+  closeSheet,
+  getSheetEl,
+  currencyOptions as currencyOptionsView,
+  personSheet as personSheetView,
+  entrySheet as entrySheetView,
+} from './ui/sheets.js';
 
 (() => {
 'use strict';
@@ -22,54 +34,14 @@ const repos = createRepos();
 const { people: peopleRepo, entries: entryRepo, attachments: attachmentRepo, meta: metaRepo } = repos;
 
 /* =========================== Utilities =========================== */
-const $ = (sel, root = document) => root.querySelector(sel);
-const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2, 10));
-const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const todayISO = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); };
 
-function fmtDate(iso) {
-  if (!iso) return '';
-  const [y, m, d] = iso.split('-').map(Number);
-  const dt = new Date(y, m - 1, d);
-  const sameYear = dt.getFullYear() === new Date().getFullYear();
-  return dt.toLocaleDateString(undefined, { day: 'numeric', month: 'short', ...(sameYear ? {} : { year: 'numeric' }) });
-}
-function avatarColor(name) {
-  let h = 0;
-  for (const ch of String(name)) h = (h * 31 + ch.codePointAt(0)) >>> 0;
-  const palette = ['#f97316', '#ef4444', '#ec4899', '#a855f7', '#6366f1', '#0ea5e9', '#14b8a6', '#22c55e', '#eab308', '#64748b'];
-  return palette[h % palette.length];
-}
-const initials = (name) => (String(name).trim().split(/\s+/).slice(0, 2).map((w) => [...w][0] || '').join('') || '?').toUpperCase();
-
-let toastTimer;
-function toast(msg, ms = 2200) {
-  const t = $('#toast');
-  t.textContent = msg;
-  t.classList.add('show');
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.remove('show'), ms);
-}
 setBlockedHandler((msg) => toast(msg));
 
 
-const ICON = {
-  back: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>',
-  chev: '<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>',
-  plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
-  gear: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
-  camera: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>',
-  trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg>',
-  close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>',
-  clip: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>',
-  folder: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>',
-  open: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3"/></svg>',
-  share: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8M16 6l-4-4-4 4M12 2v13"/></svg>'
-};
 
 /* =========================== Domain =========================== */
-/* balanceOf / sortedBalances / balanceClass → domain/balances.js */
 
 /* ---------- Attachments: images (downscaled) and any other file (stored as-is) ---------- */
 const DOC_ACCEPT = 'image/*,application/pdf,.pdf,.heic,.doc,.docx,.xls,.xlsx,.txt';
@@ -348,172 +320,47 @@ async function render() {
   revokeAll(prevUrls);
 }
 
-function navbarScroll() {
-  const nb = $('.navbar');
-  if (nb) nb.classList.toggle('scrolled', window.scrollY > 4);
-}
 window.addEventListener('scroll', navbarScroll, { passive: true });
 
-async function renderHome(seq) {
-  const [people, entries, lastBackup] = await Promise.all([peopleRepo.list(), entryRepo.list(), metaRepo.get('lastBackup', null)]);
-  if (seq !== renderSeq) return;
-  const byPerson = new Map(people.map((p) => [p.id, []]));
-  for (const e of entries) if (byPerson.has(e.personId)) byPerson.get(e.personId).push(e);
-  const total = balanceOf(entries.filter((e) => byPerson.has(e.personId)));
-  const dc = state.defaultCurrency;
-
-  const rows = people.map((p) => ({ p, bal: balanceOf(byPerson.get(p.id)), count: byPerson.get(p.id).length }));
-  // Sort: people I owe most (default currency) first, then by name.
-  rows.sort((a, b) => {
-    const av = a.bal.get(dc) || 0, bv = b.bal.get(dc) || 0;
-    const aOpen = a.bal.size > 0, bOpen = b.bal.size > 0;
-    if (aOpen !== bOpen) return aOpen ? -1 : 1;
-    if (bv !== av) return bv - av;
-    return a.p.name.localeCompare(b.p.name);
-  });
-
-  const tot = sortedBalances(total, dc);
-  const main = tot.find(([c]) => c === dc) || tot[0];
-  const heroLabel = !main ? 'All settled' : main[1] > 0 ? 'You owe in total' : 'Owed to you in total';
-  const heroAmount = main ? fmtMoney(main[1], main[0]) : fmtMoney(0, dc);
-  const others = tot.filter((t) => t !== main);
-
-  const needsBackup = entries.length > 0 && (!lastBackup || Date.now() - lastBackup > 14 * 864e5);
-
-  app.innerHTML = `
-    <header class="navbar">
-      <div class="nav-row">
-        <span class="nav-spacer"></span>
-        <span class="nav-title"></span>
-        <button class="nav-btn" id="btn-settings" aria-label="Settings & backup">${ICON.gear}</button>
-      </div>
-      <h1 class="large-title">How Much I Owe</h1>
-    </header>
-    <main>
-      <section class="hero" data-testid="total">
-        <div class="hero-label">${heroLabel}</div>
-        <div class="hero-amount" id="total-amount">${esc(heroAmount)}</div>
-        <div class="hero-sub">
-          ${others.map(([c, v]) => `<div>${v > 0 ? 'You owe' : 'Owed to you'} ${esc(fmtMoney(v, c))}</div>`).join('')}
-          ${!tot.length ? `<div>${people.length ? 'You don’t owe anyone 🎉' : 'Add someone to get started'}</div>` : ''}
-        </div>
-      </section>
-      ${needsBackup ? `<div class="banner"><span>💾 ${lastBackup ? 'Last backup ' + new Date(lastBackup).toLocaleDateString() : 'No backup yet'}. iOS can clear app data.</span><button id="btn-backup-now">Back up</button></div>` : ''}
-      ${people.length ? `
-        <div class="section-title"><span>People</span></div>
-        <div class="list" id="people-list">
-          ${rows.map(({ p, bal, count }) => {
-            const bs = sortedBalances(bal, dc);
-            const first = bs[0];
-            return `<button class="row person-row" data-id="${esc(p.id)}">
-              <span class="avatar" style="background:${avatarColor(p.name)}">${esc(initials(p.name))}</span>
-              <span class="row-main">
-                <div class="row-title">${esc(p.name)}</div>
-                <div class="row-sub">${esc(p.note || (count ? `${count} entr${count === 1 ? 'y' : 'ies'}` : 'No entries yet'))}</div>
-              </span>
-              <span class="row-end ${first ? balanceClass(first[1]) : 'settled'}" data-testid="person-balance">
-                ${first ? esc(fmtMoney(first[1], first[0])) : 'Settled'}
-                ${bs.length > 1 ? bs.slice(1, 3).map(([c, v]) => `<small class="${balanceClass(v)}">${v < 0 ? 'owes you ' : ''}${esc(fmtMoney(v, c))}</small>`).join('') + (bs.length > 3 ? `<small>+${bs.length - 3} more</small>` : '') : first ? `<small>${first[1] > 0 ? 'you owe' : 'owes you'}</small>` : ''}
-              </span>
-              ${ICON.chev}
-            </button>`;
-          }).join('')}
-        </div>` : `
-        <div class="empty">
-          <div class="big">🤝</div>
-          <h2>No one here yet</h2>
-          <p>Tap <b>+</b> to add a friend or family member you owe money to.</p>
-        </div>`}
-    </main>
-    <button class="fab" id="btn-add-person" aria-label="Add person">${ICON.plus}</button>
-  `;
-  $('#btn-add-person').onclick = () => personSheet();
-  $('#btn-settings').onclick = () => settingsSheet();
-  const bn = $('#btn-backup-now'); if (bn) bn.onclick = () => settingsSheet();
-  $$('.person-row').forEach((b) => (b.onclick = () => { location.hash = personHash(b.dataset.id); }));
-  navbarScroll();
-}
-
-/* runningBalances → domain/balances.js */
-const sortEntries = (entries) => entries.sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.createdAt || 0) - (a.createdAt || 0));
-const entryTitle = (e) => e.description || (e.type === 'repay' ? 'Paid back' : 'Borrowed');
-
-async function renderPerson(id, seq) {
-  const [person, entries, atts] = await Promise.all([peopleRepo.get(id), entryRepo.listByPerson(id), attachmentRepo.listByPerson(id)]);
-  if (seq !== renderSeq) return;
-  if (!person) { location.replace('#/'); return; }
-  const dc = state.defaultCurrency;
-  sortEntries(entries);
-  atts.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
-  const bal = sortedBalances(balanceOf(entries), dc);
-  const entryIds = new Set(entries.map((e) => e.id));
-  const countByEntry = new Map();
-  for (const a of atts) if (a.entryId && entryIds.has(a.entryId)) countByEntry.set(a.entryId, (countByEntry.get(a.entryId) || 0) + 1);
-  const general = atts.filter((a) => !a.entryId || !entryIds.has(a.entryId));
-  const runAfter = runningBalances(entries);
-
-  app.innerHTML = `
-    <header class="navbar">
-      <div class="nav-row">
-        <button class="nav-btn" id="btn-back" aria-label="Back to people">${ICON.back}<span>People</span></button>
-        <span class="nav-title">${esc(person.name)}</span>
-        <button class="nav-btn" id="btn-edit-person">Edit</button>
-      </div>
-    </header>
-    <main>
-      <section class="hero person">
-        <div class="avatar lg" style="background:${avatarColor(person.name)}">${esc(initials(person.name))}</div>
-        <div class="hero-label">${!bal.length ? 'All settled' : bal[0][1] > 0 ? 'You owe ' + esc(person.name) : esc(person.name) + ' owes you'}</div>
-        <div class="hero-amount ${bal.length ? balanceClass(bal[0][1]) : 'settled'}" id="person-balance">${bal.length ? esc(fmtMoney(bal[0][1], bal[0][0])) : esc(fmtMoney(0, dc))}</div>
-        <div class="hero-sub muted">${bal.slice(1).map(([c, v]) => `<div class="${balanceClass(v)}">${v > 0 ? 'You owe' : 'Owes you'} ${esc(fmtMoney(v, c))}</div>`).join('')}</div>
-        ${person.note ? `<div class="note">${esc(person.note)}</div>` : ''}
-      </section>
-
-      <div class="actions">
-        <button class="btn borrow" id="btn-add-borrow">${ICON.plus} I borrowed</button>
-        <button class="btn repay" id="btn-add-repay">${ICON.plus} I paid back</button>
-      </div>
-
-      <div class="section-title"><span>History</span><span>${entries.length || ''}</span></div>
-      ${entries.length ? `<div class="list entries" id="entries-list">
-        ${entries.map((e) => {
-          const n = countByEntry.get(e.id) || 0;
-          return `<button class="row entry-row" data-id="${esc(e.id)}">
-            <span class="entry-icon ${e.type}">${e.type === 'repay' ? '↑' : '↓'}</span>
-            <span class="row-main">
-              <div class="row-title">${esc(entryTitle(e))}</div>
-              <div class="row-sub">${esc(fmtDate(e.date))} · ${e.type === 'repay' ? 'I paid back' : 'I borrowed'}${n ? ` <span class="clip-badge" data-testid="att-count" aria-label="${n} attachment${n > 1 ? 's' : ''}">${ICON.clip}${n}</span>` : ''}</div>
-            </span>
-            <span class="row-end ${e.type === 'repay' ? 'owed' : 'owe'}">${esc(fmtMoney(e.type === 'repay' ? -e.amount : e.amount, e.currency, { sign: true }))}
-              <small>bal. ${esc(fmtMoney(runAfter.get(e.id), e.currency))}</small></span>
-            ${ICON.chev}
-          </button>`;
-        }).join('')}
-      </div>
-      <p class="muted center" style="margin:8px 16px 0">Tap a transaction to see or attach its receipts &amp; documents.</p>` : `<div class="list"><div class="empty-inline">No transactions yet. Add what you borrowed or paid back — you can attach receipts and documents to each one.</div></div>`}
-
-      <div class="section-title"><span>Other documents</span><button id="btn-add-photos">Add</button></div>
-      <p class="muted" style="margin:-2px 16px 8px">For things not tied to one transaction (e.g. an agreement).</p>
-      <div class="gallery" id="gallery">
-        ${general.map((a, i) => tileHtml(a, thumbFor(a, viewUrls), { idx: i })).join('')}
-        <button class="thumb add" id="btn-add-photos-2" aria-label="Add other documents">${ICON.plus}</button>
-      </div>
-    </main>
-  `;
-  $('#btn-back').onclick = () => goBack('#/');
-  $('#btn-edit-person').onclick = () => personSheet(person);
-  $('#btn-add-borrow').onclick = () => entrySheet(person, null, 'borrow');
-  $('#btn-add-repay').onclick = () => entrySheet(person, null, 'repay');
-  const addGeneral = async () => {
-    const files = await pickFiles('docs');
-    if (files.length) await saveAttachments(await processAttachments(files), person.id, null);
+function homeDeps() {
+  return {
+    peopleRepo, entryRepo, metaRepo, state, app, renderSeq,
+    personHash, personSheet, settingsSheet,
   };
-  $('#btn-add-photos').onclick = addGeneral;
-  $('#btn-add-photos-2').onclick = addGeneral;
-  $$('.entry-row').forEach((b) => (b.onclick = () => { location.hash = entryHash(person.id, b.dataset.id); }));
-  $$('#gallery .thumb[data-idx]').forEach((b) => (b.onclick = () => openViewer(general, Number(b.dataset.idx), new Map(entries.map((e) => [e.id, e])))));
-  navbarScroll();
 }
+async function renderHome(seq) { return renderHomeView(homeDeps(), seq); }
+
+function personDeps() {
+  return {
+    peopleRepo, entryRepo, attachmentRepo, state, app, renderSeq,
+    personSheet, entrySheet, goBack, entryHash,
+    tileHtml, thumbFor, viewUrls, pickFiles, processAttachments, saveAttachments, openViewer,
+  };
+}
+async function renderPerson(id, seq) { return renderPersonView(personDeps(), id, seq); }
+
+function personSheet(person = null) {
+  return personSheetView({
+    peopleRepo, deletePerson, personHash, render, uid,
+  }, person);
+}
+
+function entrySheet(person, entry = null, defaultType = 'borrow') {
+  return entrySheetView({
+    attachmentRepo, metaRepo, state, currencies: CURRENCIES, writeOps, uid, todayISO,
+    attachButtonsHtml, wireAttachButtons, processAttachments, tileHtml, thumbFor,
+    deleteEntry, route, goBack, personHash, render, revokeAll,
+  }, person, entry, defaultType);
+}
+
+function currencyOptions(selected) {
+  return currencyOptionsView(selected, CURRENCIES);
+}
+
+
+
+
+
 
 async function saveAttachments(recs, personId, entryId) {
   if (!recs.length) return;
@@ -578,88 +425,7 @@ async function deleteEntry(entry, atts) {
   return true;
 }
 
-/* =========================== Sheets =========================== */
-let sheetEl = null;
-function openSheet({ title, left = 'Cancel', right = null, body, onRight, onMount }) {
-  closeSheet(true);
-  const ov = document.createElement('div');
-  ov.className = 'overlay';
-  ov.innerHTML = `
-    <div class="sheet" role="dialog" aria-modal="true" aria-label="${esc(title)}">
-      <div class="sheet-head">
-        <button class="nav-btn" data-act="left">${esc(left)}</button>
-        <span class="nav-title">${esc(title)}</span>
-        ${right ? `<button class="nav-btn bold" data-act="right">${esc(right)}</button>` : '<span class="nav-spacer"></span>'}
-      </div>
-      <div class="sheet-body">${body}</div>
-    </div>`;
-  document.body.appendChild(ov);
-  document.body.style.overflow = 'hidden';
-  sheetEl = ov;
-  ov.addEventListener('click', (e) => { if (e.target === ov) closeSheet(); });
-  $('[data-act="left"]', ov).onclick = () => closeSheet();
-  const rb = $('[data-act="right"]', ov);
-  if (rb && onRight) rb.onclick = async () => {
-    if (rb.disabled) return;
-    rb.disabled = true;
-    try { await onRight(ov); } catch (err) { console.error(err); toast(err.message || String(err), 3500); } finally { rb.disabled = false; }
-  };
-  if (onMount) onMount(ov);
-  return ov;
-}
-function closeSheet(immediate) {
-  if (!sheetEl) return;
-  const el = sheetEl; sheetEl = null;
-  document.body.style.overflow = '';
-  if (el._cleanup) el._cleanup();
-  el.remove();
-}
 
-function currencyOptions(selected) {
-  const list = CURRENCIES.includes(selected) ? CURRENCIES : [selected, ...CURRENCIES];
-  return list.map((c) => `<option value="${c}" ${c === selected ? 'selected' : ''}>${c}</option>`).join('');
-}
-
-function personSheet(person = null) {
-  const editing = !!person;
-  openSheet({
-    title: editing ? 'Edit person' : 'New person',
-    right: editing ? 'Save' : 'Add',
-    body: `
-      <div class="field-group">
-        <div class="field"><label for="p-name">Name</label><input id="p-name" type="text" autocomplete="off" autocapitalize="words" placeholder="e.g. Ali" value="${esc(person?.name || '')}" maxlength="80" enterkeyhint="done"></div>
-        <div class="field"><label for="p-note">Note</label><textarea id="p-note" placeholder="Optional (e.g. brother, Swish number…)" maxlength="500">${esc(person?.note || '')}</textarea></div>
-      </div>
-      ${editing ? `<button class="btn danger" style="width:100%" id="p-delete">${ICON.trash} Delete person</button>
-      <p class="muted center">Deleting removes all entries and photos for this person.</p>` : ''}
-    `,
-    onMount: (ov) => {
-      const input = $('#p-name', ov);
-      setTimeout(() => { if (!editing) input.focus(); }, 50);
-      input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('[data-act="right"]', ov).click(); } });
-      const del = $('#p-delete', ov);
-      if (del) del.onclick = async () => {
-        if (!confirm(`Delete ${person.name} and all of their entries and photos? This cannot be undone.`)) return;
-        await deletePerson(person.id);
-        closeSheet();
-        toast(`${person.name} deleted`);
-        location.hash = '#/';
-        render();
-      };
-    },
-    onRight: async (ov) => {
-      const name = $('#p-name', ov).value.trim();
-      const note = $('#p-note', ov).value.trim();
-      if (!name) { toast('Please enter a name'); $('#p-name', ov).focus(); return; }
-      const now = Date.now();
-      const rec = editing ? { ...person, name, note, updatedAt: now } : { id: uid(), name, note, createdAt: now, updatedAt: now };
-      await peopleRepo.put(rec);
-      closeSheet();
-      if (!editing) location.hash = personHash(rec.id);
-      else render();
-    }
-  });
-}
 
 async function deletePerson(id) {
   const [entries, images] = await Promise.all([entryRepo.listByPerson(id), attachmentRepo.listByPerson(id)]);
@@ -670,105 +436,6 @@ async function deletePerson(id) {
   ]);
 }
 
-async function entrySheet(person, entry = null, defaultType = 'borrow') {
-  const editing = !!entry;
-  const existing = editing ? (await attachmentRepo.listByEntry(entry.id)).sort((a, b) => a.createdAt - b.createdAt) : [];
-  const sheetUrls = [];
-  let type = entry?.type || defaultType;
-  const pending = [];          // newly added attachments, saved together with the transaction
-  const removed = new Set();   // ids of existing attachments to delete on save
-  const lastCur = await metaRepo.get('lastCurrency:' + person.id, null);
-  const currency = entry?.currency || lastCur || state.defaultCurrency;
-  const amountStr = editing ? (entry.amount / 100).toLocaleString(undefined, { useGrouping: false, maximumFractionDigits: 2 }) : '';
-
-  const ov = openSheet({
-    title: editing ? 'Edit transaction' : 'New transaction',
-    right: 'Save',
-    body: `
-      <div class="segmented" role="tablist">
-        <button data-type="borrow" class="${type === 'borrow' ? 'on' : ''}" role="tab">I borrowed</button>
-        <button data-type="repay" class="${type === 'repay' ? 'on' : ''}" role="tab">I paid back</button>
-      </div>
-      <div class="field-group">
-        <div class="field amount-field">
-          <input id="e-amount" type="text" inputmode="decimal" placeholder="0" autocomplete="off" value="${esc(amountStr)}" aria-label="Amount">
-          <select id="e-currency" aria-label="Currency">${currencyOptions(currency)}</select>
-        </div>
-      </div>
-      <div class="field-group">
-        <div class="field"><label for="e-desc">Description</label><input id="e-desc" type="text" placeholder="What for?" maxlength="140" value="${esc(entry?.description || '')}" enterkeyhint="done"></div>
-        <div class="field"><label for="e-date">Date</label><input id="e-date" type="date" value="${esc(entry?.date || todayISO())}"></div>
-      </div>
-      <div class="form-label">Attach documents</div>
-      <div class="attach-box" id="e-attach">
-        <div class="gallery" id="e-gallery"></div>
-        ${attachButtonsHtml('e')}
-        <p class="muted center" style="margin:10px 0 0">Receipts, screenshots, PDFs, Word/Excel files… saved with this transaction.</p>
-      </div>
-      ${editing ? `<button class="btn danger mt" style="width:100%" id="e-delete">${ICON.trash} Delete transaction</button>` : ''}
-    `,
-    onMount: (ov) => {
-      $$('.segmented button', ov).forEach((b) => (b.onclick = () => {
-        type = b.dataset.type;
-        $$('.segmented button', ov).forEach((x) => x.classList.toggle('on', x === b));
-      }));
-      if (!editing) setTimeout(() => $('#e-amount', ov).focus(), 50);
-      const del = $('#e-delete', ov);
-      if (del) del.onclick = async () => {
-        if (!(await deleteEntry(entry, existing))) return;
-        closeSheet();
-        if (route().name === 'entry') goBack(personHash(person.id));
-        render();
-      };
-    },
-    onRight: async (ov) => {
-      const amount = parseAmount($('#e-amount', ov).value);
-      if (!Number.isFinite(amount) || amount <= 0) { toast('Enter an amount greater than 0'); $('#e-amount', ov).focus(); return; }
-      const cur = $('#e-currency', ov).value;
-      const now = Date.now();
-      const rec = {
-        ...(entry || { id: uid(), personId: person.id, createdAt: now }),
-        type, amount, currency: cur,
-        description: $('#e-desc', ov).value.trim(),
-        date: $('#e-date', ov).value || todayISO(),
-        updatedAt: now
-      };
-      await writeOps([
-        { store: 'entries', put: rec },
-        ...pending.map((p, i) => ({ store: 'images', put: { id: uid(), personId: person.id, entryId: rec.id, createdAt: now + i, ...p.rec } })),
-        ...[...removed].map((id) => ({ store: 'images', del: id })),
-        { store: 'meta', put: { key: 'lastCurrency:' + person.id, value: cur } }
-      ]);
-      closeSheet();
-      const n = pending.length;
-      toast(editing ? 'Transaction updated' : `Transaction added${n ? ` with ${n} attachment${n > 1 ? 's' : ''}` : ''}`);
-      render();
-    }
-  });
-  ov._cleanup = () => revokeAll(sheetUrls);
-
-  const gal = $('#e-gallery', ov);
-  const shown = existing.map((a) => ({ a, url: thumbFor(a, sheetUrls) }));
-  function drawGallery() {
-    const items = [
-      ...shown.filter((t) => !removed.has(t.a.id)).map((t) => ({ key: 'x:' + t.a.id, a: t.a, url: t.url })),
-      ...pending.map((p, i) => ({ key: 'p:' + i, a: p.rec, url: p.url }))
-    ];
-    gal.innerHTML = items.map((it) => tileHtml(it.a, it.url, { remove: it.key })).join('');
-    gal.classList.toggle('hidden', !items.length);
-    $$('.remove', gal).forEach((b) => (b.onclick = () => {
-      const k = b.dataset.key.slice(0, 1), v = b.dataset.key.slice(2);
-      if (k === 'x') removed.add(v); else pending.splice(Number(v), 1);
-      drawGallery();
-    }));
-  }
-  wireAttachButtons($('#e-attach', ov), async (files) => {
-    const recs = await processAttachments(files);
-    for (const rec of recs) pending.push({ rec, url: thumbFor(rec, sheetUrls) });
-    if (sheetEl === ov) drawGallery();
-  });
-  drawGallery();
-}
 
 /* ---------- Full-screen viewer for images and documents ---------- */
 function openViewer(items, index, entryById) {
@@ -836,7 +503,7 @@ function openViewer(items, index, entryById) {
       ? `${entryTitle(e)} · ${fmtDate(e.date)} · ${fmtMoney(e.amount, e.currency)}`
       : `Added ${new Date(a.createdAt).toLocaleDateString()}`);
   }
-  function close() { revokeAll(urls); v.remove(); document.body.style.overflow = sheetEl ? 'hidden' : ''; document.removeEventListener('keydown', onKey); }
+  function close() { revokeAll(urls); v.remove(); document.body.style.overflow = getSheetEl() ? 'hidden' : ''; document.removeEventListener('keydown', onKey); }
   const step = (d) => { if (items.length > 1) { i = (i + d + items.length) % items.length; show(); } };
   function onKey(e) { if (e.key === 'Escape') close(); if (e.key === 'ArrowRight') step(1); if (e.key === 'ArrowLeft') step(-1); }
   document.addEventListener('keydown', onKey);
@@ -1101,7 +768,7 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
   const hadController = !!navigator.serviceWorker.controller;
   let reloaded = false;
   navigator.serviceWorker.addEventListener('controllerchange', () => {
-    if (!hadController || reloaded || sheetEl) return;
+    if (!hadController || reloaded || getSheetEl()) return;
     reloaded = true;
     location.reload();
   });
