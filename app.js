@@ -1211,3 +1211,5 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
 }
 boot();
 })();
+
+export {};
