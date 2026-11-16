@@ -1,8 +1,9 @@
 /** Bottom sheets: shell + person/entry forms. */
 import { createPerson, updatePerson } from '../domain/people.js';
 import { createEntry, updateEntry } from '../domain/entries.js';
-import { parseAmount } from '../domain/money.js';
+import { evaluateAmount } from '../domain/expr.js';
 import { $, $$, esc, ICON, toast } from './dom.js';
+import { bindAmountField, hideAmountOps } from './amount.js';
 import {
   attachButtonsHtml,
   wireAttachButtons,
@@ -46,6 +47,7 @@ export function closeSheet(immediate) {
   if (!sheetEl) return;
   const el = sheetEl; sheetEl = null;
   document.body.style.overflow = '';
+  hideAmountOps();
   if (el._cleanup) el._cleanup();
   el.remove();
 }
@@ -143,7 +145,10 @@ export async function entrySheet(deps, person, entry = null, defaultType = 'borr
       </div>
       <div class="field-group">
         <div class="field amount-field">
-          <input id="e-amount" type="text" inputmode="decimal" placeholder="0" autocomplete="off" value="${esc(amountStr)}" aria-label="Amount">
+          <div class="amount-entry">
+            <input id="e-amount" type="text" inputmode="decimal" placeholder="0" autocomplete="off" value="${esc(amountStr)}" aria-label="Amount">
+            <p class="amount-preview is-stale" id="e-amount-preview" aria-live="polite">= …</p>
+          </div>
           <select id="e-currency" aria-label="Currency">${currencyOptions(currency, currencies)}</select>
         </div>
       </div>
@@ -164,7 +169,12 @@ export async function entrySheet(deps, person, entry = null, defaultType = 'borr
         type = b.dataset.type;
         $$('.segmented button', ov).forEach((x) => x.classList.toggle('on', x === b));
       }));
-      if (!editing) setTimeout(() => $('#e-amount', ov).focus(), 50);
+      const amountInput = $('#e-amount', ov);
+      ov._amount = bindAmountField(amountInput, $('#e-amount-preview', ov));
+      if (!editing) setTimeout(() => {
+        amountInput.focus();
+        ov._amount.show();
+      }, 50);
       const del = $('#e-delete', ov);
       if (del) del.onclick = async () => {
         if (!(await deleteEntry(entry, existing))) return;
@@ -174,7 +184,16 @@ export async function entrySheet(deps, person, entry = null, defaultType = 'borr
       };
     },
     onRight: async (ov) => {
-      const amount = parseAmount($('#e-amount', ov).value);
+      const amountInput = $('#e-amount', ov);
+      const result = evaluateAmount(amountInput.value);
+      if (result.status !== 'ok') {
+        const message = result.status === 'empty' ? 'Enter an amount greater than 0' : result.error;
+        ov._amount.showError(message);
+        toast(message);
+        amountInput.focus();
+        return;
+      }
+      const amount = result.cents;
       const cur = $('#e-currency', ov).value;
       const now = Date.now();
       let rec;
@@ -189,8 +208,10 @@ export async function entrySheet(deps, person, entry = null, defaultType = 'borr
           ? updateEntry(entry, fields, now)
           : createEntry({ id: uid(), personId: person.id, now, ...fields });
       } catch (err) {
-        toast(err.message || 'Enter an amount greater than 0');
-        $('#e-amount', ov).focus();
+        const message = err.message || 'Enter an amount greater than 0';
+        ov._amount.showError(message);
+        toast(message);
+        amountInput.focus();
         return;
       }
       await writeOps([
@@ -205,7 +226,10 @@ export async function entrySheet(deps, person, entry = null, defaultType = 'borr
       render();
     }
   });
-  ov._cleanup = () => revokeAll(sheetUrls);
+  ov._cleanup = () => {
+    revokeAll(sheetUrls);
+    ov._amount?.destroy();
+  };
 
   const gal = $('#e-gallery', ov);
   const shown = existing.map((a) => ({ a, url: thumbFor(a, sheetUrls) }));

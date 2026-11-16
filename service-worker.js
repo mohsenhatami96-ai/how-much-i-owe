@@ -1,5 +1,5 @@
 /* How Much I Owe – service worker: caches the app shell for offline use. */
-const VERSION = 'v1.3.0';
+const VERSION = 'v1.4.0';
 const CACHE = `owe-shell-${VERSION}`;
 const SHELL = [
   './',
@@ -12,10 +12,12 @@ const SHELL = [
   './domain/backup.js',
   './domain/balances.js',
   './domain/entries.js',
+  './domain/expr.js',
   './domain/money.js',
   './domain/people.js',
   './domain/ports.js',
   './storage/indexeddb.js',
+  './ui/amount.js',
   './ui/dom.js',
   './ui/entry.js',
   './ui/home.js',
