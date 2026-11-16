@@ -216,8 +216,65 @@ main { padding: 8px 16px calc(var(--safe-bottom) + 110px); max-width: 720px; mar
 .field select option { direction: ltr; }
 .field input[type="date"] { -webkit-appearance: none; appearance: none; text-align: right; min-height: 48px; color: var(--accent); }
 .field input[type="date"]::-webkit-date-and-time-value { text-align: right; }
-.amount-field input { font-size: 28px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.amount-field select { flex: none; width: auto; max-width: 110px; font-weight: 600; }
+.amount-field { align-items: flex-start; }
+.amount-entry { flex: 1; min-width: 0; padding: 8px 0 8px; }
+.amount-field .amount-entry input {
+  width: 100%;
+  padding: 6px 0 0;
+  font-size: 28px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.amount-preview {
+  margin: 0;
+  padding: 2px 0 0;
+  text-align: right;
+  font-size: 13px;
+  line-height: 1.2;
+  min-height: 16px;
+  color: var(--text-2);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+.amount-preview.is-stale { color: var(--text-3); }
+.amount-preview.is-error { color: var(--owe); }
+.amount-field select { flex: none; width: auto; max-width: 110px; font-weight: 600; align-self: flex-start; margin-top: 14px; }
+
+/* Operator row, sitting just above the keyboard while an amount is focused. */
+.amount-ops {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 70;
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  column-gap: 8px;
+  padding: 0 8px env(safe-area-inset-bottom, 0px);
+  background: var(--card);
+  border-top: 0.5px solid var(--sep);
+}
+.amount-ops button {
+  min-height: 44px;
+  height: 44px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 20px;
+  font-weight: 500;
+  font-family: inherit;
+  padding: 0;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  white-space: nowrap;
+}
+.amount-ops svg { width: 20px; height: 20px; display: block; }
+.amount-ops button:active { color: var(--accent); }
+body.amount-ops-on .sheet-body { padding-bottom: calc(var(--safe-bottom) + 68px); }
 .hint { font-size: 13px; color: var(--text-2); margin: -10px 16px 18px; }
 .form-label { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-2); margin: 0 16px 7px; }
 
