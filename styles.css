@@ -240,19 +240,54 @@ main { padding: 8px 16px calc(var(--safe-bottom) + 110px); max-width: 720px; mar
 .amount-preview.is-error { color: var(--owe); }
 .amount-field select { flex: none; width: auto; max-width: 110px; font-weight: 600; align-self: flex-start; margin-top: 14px; }
 
-/* Operator row, sitting just above the keyboard while an amount is focused. */
+/* Operator strip: calculator readout plus keys, flush with the keyboard. */
 .amount-ops {
   position: fixed;
   left: 0;
   right: 0;
-  bottom: 0;
   z-index: 70;
+  display: flex;
+  flex-direction: column;
+  padding: 4px 0;
+  background: var(--card);
+  border-top: 0.5px solid var(--sep);
+}
+.amount-ops-readout {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  padding: 0 8px 2px;
+}
+.amount-ops-expr {
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  text-align: right;
+  white-space: nowrap;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  scrollbar-width: none;
+}
+.amount-ops-expr::-webkit-scrollbar { display: none; }
+.amount-ops-caret { display: inline-block; width: 0; }
+.amount-ops-result {
+  flex: none;
+  font-size: 15px;
+  line-height: 1.2;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+.amount-ops-result.is-stale { color: var(--text-3); }
+.amount-ops-result.is-error { color: var(--owe); }
+.amount-ops-keys {
   display: grid;
   grid-template-columns: repeat(6, 1fr);
   column-gap: 8px;
-  padding: 0 8px env(safe-area-inset-bottom, 0px);
-  background: var(--card);
-  border-top: 0.5px solid var(--sep);
+  padding: 0 8px;
 }
 .amount-ops button {
   min-height: 44px;
@@ -274,7 +309,7 @@ main { padding: 8px 16px calc(var(--safe-bottom) + 110px); max-width: 720px; mar
 }
 .amount-ops svg { width: 20px; height: 20px; display: block; }
 .amount-ops button:active { color: var(--accent); }
-body.amount-ops-on .sheet-body { padding-bottom: calc(var(--safe-bottom) + 68px); }
+body.amount-ops-on .sheet-body { padding-bottom: calc(var(--safe-bottom) + 140px); }
 .hint { font-size: 13px; color: var(--text-2); margin: -10px 16px 18px; }
 .form-label { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-2); margin: 0 16px 7px; }
 
