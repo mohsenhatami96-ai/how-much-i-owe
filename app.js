@@ -19,6 +19,7 @@ import {
   personSheet as personSheetView,
   entrySheet as entrySheetView,
 } from './ui/sheets.js';
+import { relayoutAmountOps } from './ui/amount.js';
 import {
   processImage,
   canEncodeWebP,
@@ -35,7 +36,7 @@ import {
 (() => {
 'use strict';
 
-const APP_VERSION = '1.4.0';
+const APP_VERSION = '1.4.1';
 const CURRENCIES = ['SEK', 'EUR', 'USD', 'GBP', 'NOK', 'DKK', 'IRR', 'TRY', 'CHF', 'AED', 'CAD', 'AUD', 'JPY', 'CNY', 'INR', 'PLN'];
 
 const repos = createRepos();
@@ -158,7 +159,7 @@ async function importData(text) {
 window.oweApp = {
   parseAmount, balanceOf, buildExport, importData,
   processImage: (file, mode, opts) => processImage(file, mode ?? state.photoQuality, opts),
-  canEncodeWebP, PHOTO_MODES, version: APP_VERSION
+  canEncodeWebP, PHOTO_MODES, version: APP_VERSION, relayoutAmountOps
 };
 
 window.addEventListener('hashchange', () => { onHashNav(); closeSheet(); render(); window.scrollTo(0, 0); });
