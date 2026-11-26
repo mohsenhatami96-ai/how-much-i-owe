@@ -1,4 +1,4 @@
-/* How Much I Owe – a local-first PWA for tracking money you owe.
+/* How Much I Owe – a local-first PWA for tracking money between you and friends and family.
  * Data lives in IndexedDB on the device. No backend, no build step.
  * Composition root: wires ports, UI, and boot. */
 import { parseAmount } from './domain/money.js';
@@ -36,7 +36,7 @@ import {
 (() => {
 'use strict';
 
-const APP_VERSION = '1.4.1';
+const APP_VERSION = '1.4.2';
 const CURRENCIES = ['SEK', 'EUR', 'USD', 'GBP', 'NOK', 'DKK', 'IRR', 'TRY', 'CHF', 'AED', 'CAD', 'AUD', 'JPY', 'CNY', 'INR', 'PLN'];
 
 const repos = createRepos();

@@ -1,5 +1,5 @@
 /** Entry detail screen. */
-import { entryTitle, sortEntries } from '../domain/entries.js';
+import { directionPhrase, entryTitle, sortEntries } from '../domain/entries.js';
 import { runningBalances } from '../domain/balances.js';
 import { fmtMoney } from '../domain/money.js';
 import { $, $$, esc, ICON, fmtDate, navbarScroll } from './dom.js';
@@ -44,7 +44,7 @@ export async function renderEntry(deps, pid, eid, seq) {
     <main>
       <section class="hero person entry-hero">
         <div class="entry-icon lg ${entry.type}">${entry.type === 'repay' ? '↑' : '↓'}</div>
-        <div class="hero-label">${entry.type === 'repay' ? 'I paid back ' : 'I borrowed from '}${esc(person.name)}</div>
+        <div class="hero-label">${esc(directionPhrase(entry.type, person.name))}</div>
         <div class="hero-amount ${entry.type === 'repay' ? 'owed' : 'owe'}" id="entry-amount">${esc(fmtMoney(signed, entry.currency, { sign: true }))}</div>
         <div class="entry-desc" id="entry-desc">${esc(entryTitle(entry))}</div>
         <div class="muted">${esc(fmtDate(entry.date))} · balance after: ${esc(fmtMoney(rb, entry.currency))}${rb < 0 ? ' (owes you)' : ''}</div>

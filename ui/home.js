@@ -52,7 +52,7 @@ export async function renderHome(deps, seq) {
         <div class="hero-amount" id="total-amount">${esc(heroAmount)}</div>
         <div class="hero-sub">
           ${others.map(([c, v]) => `<div>${v > 0 ? 'You owe' : 'Owed to you'} ${esc(fmtMoney(v, c))}</div>`).join('')}
-          ${!tot.length ? `<div>${people.length ? 'You don’t owe anyone 🎉' : 'Add someone to get started'}</div>` : ''}
+          ${!tot.length ? `<div>${people.length ? 'Nothing owed either way 🎉' : 'Add someone to get started'}</div>` : ''}
         </div>
       </section>
       ${needsBackup ? `<div class="banner"><span>💾 ${lastBackup ? 'Last backup ' + new Date(lastBackup).toLocaleDateString() : 'No backup yet'}. iOS can clear app data.</span><button id="btn-backup-now">Back up</button></div>` : ''}
@@ -79,7 +79,7 @@ export async function renderHome(deps, seq) {
         <div class="empty">
           <div class="big">🤝</div>
           <h2>No one here yet</h2>
-          <p>Tap <b>+</b> to add a friend or family member you owe money to.</p>
+          <p>Track money between you and friends and family. Tap <b>+</b> to add someone.</p>
         </div>`}
     </main>
     <button class="fab" id="btn-add-person" aria-label="Add person">${ICON.plus}</button>

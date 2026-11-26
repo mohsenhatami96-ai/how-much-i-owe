@@ -139,6 +139,8 @@ main { padding: 8px 16px calc(var(--safe-bottom) + 110px); max-width: 720px; mar
 
 /* ---------- Action buttons ---------- */
 .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 0 0 4px; }
+.actions .btn { min-width: 0; padding: 0 10px; }
+.btn-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .actions .btn.full { grid-column: 1 / -1; }
 .btn {
   min-height: 50px; border-radius: 13px; border: 0; padding: 0 16px; font-weight: 600; font-size: 17px;
@@ -314,7 +316,11 @@ body.amount-ops-on .sheet-body { padding-bottom: calc(var(--safe-bottom) + 140px
 .form-label { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-2); margin: 0 16px 7px; }
 
 .segmented { display: grid; grid-template-columns: 1fr 1fr; background: color-mix(in srgb, var(--text) 8%, transparent); border-radius: 10px; padding: 2px; margin-bottom: 18px; }
-.segmented button { min-height: 40px; border: 0; background: none; border-radius: 8px; font-weight: 600; font-size: 15px; color: var(--text); }
+.segmented button {
+  min-height: 44px; min-width: 0; border: 0; background: none; border-radius: 8px;
+  padding: 0 8px; font-weight: 600; font-size: 15px; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .segmented button.on { background: var(--card); box-shadow: 0 2px 6px rgba(0,0,0,.12); }
 .segmented button.on[data-type="borrow"] { color: var(--owe); }
 .segmented button.on[data-type="repay"] { color: var(--owed); }

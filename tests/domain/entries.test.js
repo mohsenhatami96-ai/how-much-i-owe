@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   ENTRY_TYPES,
   normalizeEntryType,
+  directionPhrase,
   entryTitle,
   sortEntries,
   validateEntryInput,
@@ -24,12 +25,25 @@ describe('ENTRY_TYPES / normalizeEntryType', () => {
   });
 });
 
+describe('directionPhrase', () => {
+  it('says which way the money went, with the name when there is one', () => {
+    assert.equal(directionPhrase('repay', 'Sara'), 'I gave Sara');
+    assert.equal(directionPhrase('borrow', 'Sara'), 'Sara gave me');
+    assert.equal(directionPhrase('repay', '  Ali  '), 'I gave Ali');
+    assert.equal(directionPhrase('borrow'), 'Gave me');
+    assert.equal(directionPhrase('repay', ''), 'I gave');
+    assert.equal(directionPhrase('lend', 'Sara'), 'Sara gave me');
+  });
+});
+
 describe('entryTitle', () => {
-  it('prefers description, else Paid back / Borrowed', () => {
+  it('prefers description, else I gave / Gave me', () => {
     assert.equal(entryTitle({ description: 'lunch', type: 'borrow' }), 'lunch');
-    assert.equal(entryTitle({ description: '', type: 'repay' }), 'Paid back');
-    assert.equal(entryTitle({ type: 'borrow' }), 'Borrowed');
-    assert.equal(entryTitle({ description: null, type: 'repay' }), 'Paid back');
+    assert.equal(entryTitle({ description: '', type: 'repay' }), 'I gave');
+    assert.equal(entryTitle({ type: 'borrow' }), 'Gave me');
+    assert.equal(entryTitle({ description: null, type: 'repay' }), 'I gave');
+    assert.equal(entryTitle({ type: 'repay' }, 'Sara'), 'I gave Sara');
+    assert.equal(entryTitle({ description: 'lunch', type: 'borrow' }, 'Sara'), 'lunch');
   });
 });
 

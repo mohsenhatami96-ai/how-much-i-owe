@@ -1,6 +1,6 @@
 # How Much I Owe
 
-A tiny, private, offline-capable PWA for tracking money you owe friends and family.
+A tiny, private, offline-capable PWA to track money between you and friends and family.
 Pure static files: no build step, no backend. All data stays on the device in IndexedDB.
 
 ## Run locally

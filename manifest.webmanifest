@@ -1,7 +1,7 @@
 {
   "name": "How Much I Owe",
   "short_name": "I Owe",
-  "description": "Track money you owe friends and family. Offline, private, on-device.",
+  "description": "Track money between you and friends and family. Offline, private, on-device.",
   "id": "./",
   "start_url": "./",
   "scope": "./",
