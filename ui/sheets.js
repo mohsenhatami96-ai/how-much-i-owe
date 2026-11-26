@@ -172,6 +172,7 @@ export async function entrySheet(deps, person, entry = null, defaultType = 'borr
       const amountInput = $('#e-amount', ov);
       ov._amount = bindAmountField(amountInput, $('#e-amount-preview', ov));
       if (!editing) setTimeout(() => {
+        if (!amountInput.isConnected) return;
         amountInput.focus();
         ov._amount.show();
       }, 50);
