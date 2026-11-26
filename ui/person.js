@@ -1,5 +1,5 @@
 import { avatarColor, initials } from '../domain/people.js';
-import { entryTitle, sortEntries } from '../domain/entries.js';
+import { directionPhrase, entryTitle, sortEntries } from '../domain/entries.js';
 import { balanceOf, sortedBalances, runningBalances, balanceClass } from '../domain/balances.js';
 import { fmtMoney } from '../domain/money.js';
 import { $, $$, esc, ICON, fmtDate, navbarScroll } from './dom.js';
@@ -48,8 +48,8 @@ export async function renderPerson(deps, id, seq) {
       </section>
 
       <div class="actions">
-        <button class="btn borrow" id="btn-add-borrow">${ICON.plus} I borrowed</button>
-        <button class="btn repay" id="btn-add-repay">${ICON.plus} I paid back</button>
+        <button class="btn borrow" id="btn-add-borrow">${ICON.plus}<span class="btn-label">${esc(directionPhrase('borrow', person.name))}</span></button>
+        <button class="btn repay" id="btn-add-repay">${ICON.plus}<span class="btn-label">${esc(directionPhrase('repay', person.name))}</span></button>
       </div>
 
       <div class="section-title"><span>History</span><span>${entries.length || ''}</span></div>
@@ -60,7 +60,7 @@ export async function renderPerson(deps, id, seq) {
             <span class="entry-icon ${e.type}">${e.type === 'repay' ? '↑' : '↓'}</span>
             <span class="row-main">
               <div class="row-title">${esc(entryTitle(e))}</div>
-              <div class="row-sub">${esc(fmtDate(e.date))} · ${e.type === 'repay' ? 'I paid back' : 'I borrowed'}${n ? ` <span class="clip-badge" data-testid="att-count" aria-label="${n} attachment${n > 1 ? 's' : ''}">${ICON.clip}${n}</span>` : ''}</div>
+              <div class="row-sub">${esc(fmtDate(e.date))} · ${esc(directionPhrase(e.type, person.name))}${n ? ` <span class="clip-badge" data-testid="att-count" aria-label="${n} attachment${n > 1 ? 's' : ''}">${ICON.clip}${n}</span>` : ''}</div>
             </span>
             <span class="row-end ${e.type === 'repay' ? 'owed' : 'owe'}">${esc(fmtMoney(e.type === 'repay' ? -e.amount : e.amount, e.currency, { sign: true }))}
               <small>bal. ${esc(fmtMoney(runAfter.get(e.id), e.currency))}</small></span>
@@ -68,7 +68,7 @@ export async function renderPerson(deps, id, seq) {
           </button>`;
         }).join('')}
       </div>
-      <p class="muted center" style="margin:8px 16px 0">Tap a transaction to see or attach its receipts &amp; documents.</p>` : `<div class="list"><div class="empty-inline">No transactions yet. Add what you borrowed or paid back — you can attach receipts and documents to each one.</div></div>`}
+      <p class="muted center" style="margin:8px 16px 0">Tap a transaction to see or attach its receipts &amp; documents.</p>` : `<div class="list"><div class="empty-inline">No transactions yet. Add money you gave each other — you can attach receipts and documents to each one.</div></div>`}
 
       <div class="section-title"><span>Other documents</span><button id="btn-add-photos">Add</button></div>
       <p class="muted" style="margin:-2px 16px 8px">For things not tied to one transaction (e.g. an agreement).</p>

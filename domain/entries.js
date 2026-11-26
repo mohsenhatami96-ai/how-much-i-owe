@@ -13,11 +13,26 @@ export function normalizeEntryType(type) {
 }
 
 /**
- * @param {{ description?: unknown, type?: string }} e
+ * Which way the money went. repay: "I gave {name}" (or "I gave").
+ * borrow: "{name} gave me" (or "Gave me").
+ * @param {unknown} type
+ * @param {unknown} [name]
  * @returns {string}
  */
-export function entryTitle(e) {
-  return e.description || (e.type === 'repay' ? 'Paid back' : 'Borrowed');
+export function directionPhrase(type, name) {
+  const who = String(name ?? '').trim();
+  if (normalizeEntryType(type) === 'repay') return who ? `I gave ${who}` : 'I gave';
+  return who ? `${who} gave me` : 'Gave me';
+}
+
+/**
+ * Description, or the direction phrase when there is none.
+ * @param {{ description?: unknown, type?: string }} e
+ * @param {unknown} [name]
+ * @returns {string}
+ */
+export function entryTitle(e, name) {
+  return (e && e.description) || directionPhrase(e && e.type, name);
 }
 
 /**

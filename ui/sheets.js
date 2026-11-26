@@ -1,6 +1,6 @@
 /** Bottom sheets: shell + person/entry forms. */
 import { createPerson, updatePerson } from '../domain/people.js';
-import { createEntry, updateEntry } from '../domain/entries.js';
+import { createEntry, directionPhrase, updateEntry } from '../domain/entries.js';
 import { evaluateAmount } from '../domain/expr.js';
 import { $, $$, esc, ICON, toast } from './dom.js';
 import { bindAmountField, hideAmountOps } from './amount.js';
@@ -140,8 +140,8 @@ export async function entrySheet(deps, person, entry = null, defaultType = 'borr
     right: 'Save',
     body: `
       <div class="segmented" role="tablist">
-        <button data-type="borrow" class="${type === 'borrow' ? 'on' : ''}" role="tab">I borrowed</button>
-        <button data-type="repay" class="${type === 'repay' ? 'on' : ''}" role="tab">I paid back</button>
+        <button data-type="borrow" class="${type === 'borrow' ? 'on' : ''}" role="tab">${esc(directionPhrase('borrow', person.name))}</button>
+        <button data-type="repay" class="${type === 'repay' ? 'on' : ''}" role="tab">${esc(directionPhrase('repay', person.name))}</button>
       </div>
       <div class="field-group">
         <div class="field amount-field">
