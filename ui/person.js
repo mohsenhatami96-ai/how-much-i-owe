@@ -48,8 +48,8 @@ export async function renderPerson(deps, id, seq) {
       </section>
 
       <div class="actions">
-        <button class="btn borrow" id="btn-add-borrow">${ICON.plus}<span class="btn-label">${esc(directionPhrase('borrow', person.name))}</span></button>
-        <button class="btn repay" id="btn-add-repay">${ICON.plus}<span class="btn-label">${esc(directionPhrase('repay', person.name))}</span></button>
+        <button class="btn borrow" id="btn-add-borrow">${ICON.down}<span class="btn-label">${esc(directionPhrase('borrow', person.name))}</span></button>
+        <button class="btn repay" id="btn-add-repay">${ICON.up}<span class="btn-label">${esc(directionPhrase('repay', person.name))}</span></button>
       </div>
 
       <div class="section-title"><span>History</span><span>${entries.length || ''}</span></div>

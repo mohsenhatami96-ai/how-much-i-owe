@@ -158,6 +158,7 @@ export function hideAmountOps() {
  * @param {HTMLInputElement} input
  */
 export function showAmountOps(input) {
+  if (!input.isConnected) return;
   activeInput = input;
   const el = ensureBar();
   el.classList.remove('hidden');

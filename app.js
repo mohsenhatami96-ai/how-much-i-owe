@@ -36,7 +36,7 @@ import {
 (() => {
 'use strict';
 
-const APP_VERSION = '1.4.2';
+const APP_VERSION = '1.4.3';
 const CURRENCIES = ['SEK', 'EUR', 'USD', 'GBP', 'NOK', 'DKK', 'IRR', 'TRY', 'CHF', 'AED', 'CAD', 'AUD', 'JPY', 'CNY', 'INR', 'PLN'];
 
 const repos = createRepos();
